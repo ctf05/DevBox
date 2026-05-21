@@ -37,10 +37,11 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     npx --yes playwright@latest install --with-deps chromium firefox webkit
 
-# ── GitHub-release binaries (parallel download) ────────────────────
+# ── GitHub-release binaries (parallel download) + terminfo ────────
 # This layer rebuilds when versions in install-tools.sh change.
 COPY install-tools.sh /tmp/install-tools.sh
-RUN bash /tmp/install-tools.sh && rm /tmp/install-tools.sh
+COPY config/ghostty.terminfo /tmp/ghostty.terminfo
+RUN bash /tmp/install-tools.sh && rm /tmp/install-tools.sh /tmp/ghostty.terminfo
 
 # ── User: `dev` (UID 1000), passwordless sudo, zsh login shell ─────
 RUN userdel -r ubuntu 2>/dev/null || true \

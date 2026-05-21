@@ -26,12 +26,16 @@ DL=/tmp/dl
 BIN=/usr/local/bin
 mkdir -p "$DL" "$BIN"
 
-# Helper: download to $DL/$1 from $2 in background.
+# Helper: download to $DL/$1 from $2; prints which URL failed (silent
+# curl in parallel hides the offender otherwise).
 fetch() {
   local out="$DL/$1"
   local url="$2"
   if [[ -s "$out" ]]; then return 0; fi
-  curl -fsSL --retry 3 --retry-delay 2 "$url" -o "$out"
+  if ! curl -fsSL --retry 3 --retry-delay 2 "$url" -o "$out"; then
+    echo "✗ FAILED: $1 ($url)" >&2
+    return 1
+  fi
 }
 
 echo "→ Downloading binaries in parallel"
@@ -52,7 +56,6 @@ fetch tlrc.tgz        "https://github.com/tldr-pages/tlrc/releases/download/v${T
 fetch delta.tgz       "https://github.com/dandavison/delta/releases/download/${DELTA_VER}/delta-${DELTA_VER}-${ARCH}-unknown-linux-gnu.tar.gz" & pids+=($!)
 fetch nvim.tgz        "https://github.com/neovim/neovim/releases/download/v${NVIM_VER}/nvim-linux-x86_64.tar.gz" & pids+=($!)
 fetch gh.tgz          "https://github.com/cli/cli/releases/download/v${GH_VER}/gh_${GH_VER}_linux_amd64.tar.gz" & pids+=($!)
-fetch ghostty.terminfo "https://raw.githubusercontent.com/ghostty-org/ghostty/main/src/terminfo/ghostty.terminfo" & pids+=($!)
 
 # Wait for all parallel downloads.
 for p in "${pids[@]}"; do
@@ -108,8 +111,9 @@ ln -sfn /opt/nvim-linux-x86_64/bin/nvim                        "$BIN/nvim"
 # gh: archive root: gh_${VER}_linux_amd64/{bin,share}
 tar -xzf gh.tgz && install -m755 gh_*/bin/gh                   "$BIN/gh"
 
-# ── terminfo (full ghostty entry, advertises 24-bit color) ─────────
-tic -x -o /usr/share/terminfo ghostty.terminfo
+# ── terminfo (vendored from Ghostty 1.2.3; Tc + Su capabilities) ───
+# The file is COPY'd into the image by the Dockerfile to /tmp/ghostty.terminfo.
+tic -x -o /usr/share/terminfo /tmp/ghostty.terminfo
 
 # ── Symlinks for apt-named binaries ────────────────────────────────
 # Ubuntu names: fd-find -> fdfind, bat -> batcat (avoid namespace clashes)
