@@ -27,6 +27,8 @@ RUN npx --yes playwright@latest install --with-deps chromium firefox webkit \
 RUN userdel -r ubuntu 2>/dev/null || true \
     && useradd -m -u 1000 -U -s /bin/zsh dev \
     && echo "dev ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/dev \
+    && touch /home/dev/.zshrc \
+    && chown dev:dev /home/dev/.zshrc \
     && mkdir -p /etc/skel-dev \
     && cp -a /home/dev/. /etc/skel-dev/
 
