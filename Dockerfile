@@ -12,6 +12,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && locale-gen en_US.UTF-8 \
     && rm -rf /var/lib/apt/lists/*
 
+RUN curl -fsSL -o /tmp/ghostty.terminfo \
+      https://raw.githubusercontent.com/ghostty-org/ghostty/main/src/terminfo/ghostty.terminfo \
+    && tic -x -o /usr/share/terminfo /tmp/ghostty.terminfo \
+    && rm /tmp/ghostty.terminfo
+
 RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash - \
     && apt-get install -y nodejs \
     && npm install -g pnpm @anthropic-ai/claude-code \
