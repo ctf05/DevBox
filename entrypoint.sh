@@ -17,11 +17,12 @@ chmod 644 "$HOST_KEYS"/*.pub
 # shell history, atuin DB, etc).
 cp -an /etc/skel-dev/. /home/dev/ 2>/dev/null || true
 
-# authorized_keys from env var
+# authorized_keys from env var (keys separated by `|`)
 mkdir -p /home/dev/.ssh
 if [ -n "${SSH_AUTHORIZED_KEYS:-}" ]; then
-  printf '%s\n' "$SSH_AUTHORIZED_KEYS" > /home/dev/.ssh/authorized_keys
+  printf '%s' "$SSH_AUTHORIZED_KEYS" | tr '|' '\n' > /home/dev/.ssh/authorized_keys
 fi
+chown -R dev:dev /home/dev/.ssh
 chmod 700 /home/dev/.ssh
 [ -f /home/dev/.ssh/authorized_keys ] && chmod 600 /home/dev/.ssh/authorized_keys
 
