@@ -20,7 +20,8 @@ RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash - \
 RUN npx --yes playwright@latest install --with-deps chromium firefox webkit \
     && rm -rf /var/lib/apt/lists/*
 
-RUN useradd -m -u 1000 -U -s /bin/zsh dev \
+RUN userdel -r ubuntu 2>/dev/null || true \
+    && useradd -m -u 1000 -U -s /bin/zsh dev \
     && echo "dev ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/dev \
     && mkdir -p /etc/skel-dev \
     && cp -a /home/dev/. /etc/skel-dev/
