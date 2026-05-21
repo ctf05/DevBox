@@ -12,8 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && locale-gen en_US.UTF-8 \
     && rm -rf /var/lib/apt/lists/*
 
-RUN curl -fsSL -o /tmp/ghostty.terminfo \
-      https://raw.githubusercontent.com/ghostty-org/ghostty/main/src/terminfo/ghostty.terminfo \
+RUN printf 'xterm-ghostty|Ghostty,\n\tuse=xterm-256color,\n' > /tmp/ghostty.terminfo \
     && tic -x -o /usr/share/terminfo /tmp/ghostty.terminfo \
     && rm /tmp/ghostty.terminfo
 
