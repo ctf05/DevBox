@@ -36,4 +36,12 @@ if [ -n "${TZ:-}" ] && [ -f "/usr/share/zoneinfo/$TZ" ]; then
 fi
 
 chown -R dev:dev /home/dev
+
+# Ensure the bind-mounted /workspace is owned by `dev` so Mutagen syncs
+# from the laptop can write through the SSH user. Top-level only — don't
+# recurse, both to keep boot fast and to leave existing per-project trees
+# alone (their content already has correct ownership from prior writes).
+mkdir -p /workspace
+chown dev:dev /workspace
+
 exec /usr/sbin/sshd -D -e
