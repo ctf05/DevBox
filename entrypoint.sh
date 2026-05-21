@@ -11,10 +11,11 @@ fi
 chmod 600 "$HOST_KEYS"/*_key
 chmod 644 "$HOST_KEYS"/*.pub
 
-# Populate /home/dev on first boot from skeleton
-if [ ! -f /home/dev/.zshrc ]; then
-  cp -an /etc/skel-dev/. /home/dev/ || true
-fi
+# Seed /home/dev from /etc/skel-dev on every boot.
+# `cp -an` is no-clobber + recursive — adds any files the image now ships
+# without touching the user's existing customizations (Claude Code creds,
+# shell history, atuin DB, etc).
+cp -an /etc/skel-dev/. /home/dev/ 2>/dev/null || true
 
 # authorized_keys from env var
 mkdir -p /home/dev/.ssh

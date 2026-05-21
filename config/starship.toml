@@ -1,0 +1,45 @@
+palette = "neon"
+
+[character]
+success_symbol = "[❯](green)"
+error_symbol = "[❯](red)"
+
+[directory]
+style = "blue bold"
+truncation_length = 3
+
+[git_branch]
+symbol = " "
+style = "pink"
+
+[git_status]
+style = "red"
+
+[nodejs]
+symbol = " "
+
+[python]
+symbol = " "
+
+[ruby]
+symbol = " "
+
+[rust]
+symbol = " "
+
+[package]
+disabled = true
+
+[palettes.neon]
+red = "#ff3d7f"
+orange = "#ffb52e"
+yellow = "#ffe100"
+green = "#7dff3e"
+blue = "#c76bff"
+purple = "#c76bff"
+pink = "#ff56d3"
+cyan = "#0dfff8"
+text = "#ffffff"
+dimmed = "#5d5d5d"
+surface = "#252525"
+base = "#171717"

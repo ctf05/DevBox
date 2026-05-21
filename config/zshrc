@@ -1,0 +1,74 @@
+# /etc/zsh/zshrc — system-wide interactive zsh config.
+# Mirrors the Pop!_OS laptop setup from the dotfiles repo.
+
+# ── History ────────────────────────────────────────────────────────
+HISTFILE="${HOME}/.zsh_history"
+HISTSIZE=50000
+SAVEHIST=50000
+setopt SHARE_HISTORY HIST_IGNORE_DUPS HIST_IGNORE_ALL_DUPS HIST_REDUCE_BLANKS
+
+# ── Completion ─────────────────────────────────────────────────────
+autoload -Uz compinit
+compinit -u
+
+# ── Plugins (apt-installed in Dockerfile) ──────────────────────────
+[[ -f /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh ]] && \
+  source /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh
+[[ -f /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh ]] && \
+  source /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
+
+ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE='fg=#a5ff7e,bold'
+typeset -gA ZSH_HIGHLIGHT_STYLES
+ZSH_HIGHLIGHT_STYLES[command]='fg=#ffb52e,bold'
+ZSH_HIGHLIGHT_STYLES[builtin]='fg=#ffb52e,bold'
+ZSH_HIGHLIGHT_STYLES[alias]='fg=#ffb52e,bold'
+
+# ── Tool integrations ──────────────────────────────────────────────
+command -v zoxide >/dev/null && eval "$(zoxide init zsh --cmd cd)"
+command -v atuin  >/dev/null && eval "$(atuin init zsh)"
+command -v mise   >/dev/null && eval "$(mise activate zsh)"
+command -v starship >/dev/null && eval "$(starship init zsh)"
+
+# ── fzf ────────────────────────────────────────────────────────────
+[[ -f /usr/share/doc/fzf/examples/key-bindings.zsh ]] && \
+  source /usr/share/doc/fzf/examples/key-bindings.zsh
+[[ -f /usr/share/doc/fzf/examples/completion.zsh ]] && \
+  source /usr/share/doc/fzf/examples/completion.zsh
+
+export FZF_DEFAULT_COMMAND='fd --type f --hidden --follow --exclude .git'
+export FZF_DEFAULT_OPTS='--height 40% --layout=reverse --border \
+  --color=fg:#ffffff,bg:#171717,hl:#ffe100 \
+  --color=fg+:#ffffff,bg+:#252525,hl+:#ffe100 \
+  --color=info:#0dfff8,prompt:#ff56d3,pointer:#ff3d7f \
+  --color=marker:#7dff3e,spinner:#c76bff,header:#5d5d5d'
+
+# ── Aliases (parity with shared.nix) ───────────────────────────────
+alias ls='eza --icons=auto'
+alias ll='eza -la --icons=auto --git'
+alias lt='eza --tree --icons=auto --level=2'
+alias cat='bat'
+alias gd='git diff'
+alias vim='nvim'
+alias v='nvim'
+alias lg='lazygit'
+alias y='yazi'
+alias grep='rg'
+alias find='fd'
+alias diff='difft'
+alias du='dust'
+alias top='btop'
+alias htop='btop'
+
+# ── yy: cd-into-yazi-cwd-on-exit ───────────────────────────────────
+yy() {
+  local tmp
+  tmp="$(mktemp -t "yazi-cwd.XXXXXX")"
+  yazi "$@" --cwd-file="$tmp"
+  if cwd="$(cat -- "$tmp")" && [ -n "$cwd" ] && [ "$cwd" != "$PWD" ]; then
+    cd -- "$cwd"
+  fi
+  rm -f -- "$tmp"
+}
+
+# ── Secrets (optional, off by default in container) ────────────────
+[[ -f "${HOME}/.secrets" ]] && source "${HOME}/.secrets"

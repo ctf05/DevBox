@@ -1,0 +1,28 @@
+gui:
+  theme:
+    activeBorderColor:
+      - "#ff56d3"
+      - bold
+    inactiveBorderColor:
+      - "#5d5d5d"
+    optionsTextColor:
+      - "#0dfff8"
+    selectedLineBgColor:
+      - "#252525"
+    cherryPickedCommitBgColor:
+      - "#252525"
+    cherryPickedCommitFgColor:
+      - "#7dff3e"
+    unstagedChangesColor:
+      - "#ff3d7f"
+    defaultFgColor:
+      - "#ffffff"
+    searchingActiveBorderColor:
+      - "#ffe100"
+  nerdFontsVersion: "3"
+  showIcons: true
+git:
+  paging:
+    pager: delta --paging=never --side-by-side --line-numbers --hyperlinks --syntax-theme=base16 --file-style="bold #ff56d3" --file-decoration-style="#ff56d3 ul" --hunk-header-decoration-style="#5d5d5d box" --line-numbers-minus-style="#ff3d7f" --line-numbers-plus-style="#7dff3e" --line-numbers-zero-style="#5d5d5d" --minus-style="syntax #2e1a1a" --minus-emph-style="syntax #4a1a2a" --plus-style="syntax #1a2e1a" --plus-emph-style="syntax #1a4a2a"
+os:
+  editPreset: "nvim"

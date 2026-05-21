@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1.7
+
 FROM ubuntu:24.04
 
 ARG NODE_VERSION=22
@@ -6,38 +8,69 @@ ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8 \
     LC_ALL=C.UTF-8
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# ── Base apt layer (rarely changes; heavy cache value) ─────────────
+# All shells, editors, modern CLI tools available in apt, language deps
+# for treesitter/mason builds, and plugins for zsh.
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates curl wget gnupg sudo openssh-server \
       git tmux zsh build-essential locales tzdata jq unzip ncurses-term \
-    && locale-gen en_US.UTF-8 \
-    && rm -rf /var/lib/apt/lists/*
+      python3 python3-pip pipx \
+      ripgrep fd-find bat fzf httpie \
+      zsh-autosuggestions zsh-syntax-highlighting \
+      btop \
+      tree-sitter-cli \
+      gcc g++ make cmake \
+      libssl-dev pkg-config \
+    && locale-gen en_US.UTF-8
 
-RUN printf 'xterm-ghostty|Ghostty,\n\tuse=xterm-256color,\n' > /tmp/ghostty.terminfo \
-    && tic -x -o /usr/share/terminfo /tmp/ghostty.terminfo \
-    && rm /tmp/ghostty.terminfo
-
-RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash - \
+# ── NodeSource + pnpm + Claude Code ────────────────────────────────
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash - \
     && apt-get install -y nodejs \
-    && npm install -g pnpm @anthropic-ai/claude-code \
-    && rm -rf /var/lib/apt/lists/*
+    && npm install -g pnpm @anthropic-ai/claude-code
 
-RUN npx --yes playwright@latest install --with-deps chromium firefox webkit \
-    && rm -rf /var/lib/apt/lists/*
+# ── Playwright browsers + their deps (slow, cache-stable) ──────────
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    npx --yes playwright@latest install --with-deps chromium firefox webkit
 
+# ── GitHub-release binaries (parallel download) ────────────────────
+# This layer rebuilds when versions in install-tools.sh change.
+COPY install-tools.sh /tmp/install-tools.sh
+RUN bash /tmp/install-tools.sh && rm /tmp/install-tools.sh
+
+# ── User: `dev` (UID 1000), passwordless sudo, zsh login shell ─────
 RUN userdel -r ubuntu 2>/dev/null || true \
     && useradd -m -u 1000 -U -s /bin/zsh dev \
     && echo "dev ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/dev \
-    && touch /home/dev/.zshrc \
-    && chown dev:dev /home/dev/.zshrc \
     && mkdir -p /etc/skel-dev \
     && cp -a /home/dev/. /etc/skel-dev/
 
+# ── SSH server hardening ───────────────────────────────────────────
 RUN mkdir -p /var/run/sshd \
     && sed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config \
     && sed -i 's/#PermitRootLogin .*/PermitRootLogin no/' /etc/ssh/sshd_config \
     && sed -i 's|HostKey /etc/ssh/|HostKey /etc/ssh/keys/|g' /etc/ssh/sshd_config
 
-COPY tmux.conf /etc/tmux.conf
+# ── System-wide config files (volatile; last for max cache reuse) ──
+# Each tool's config search path is set in /etc/zsh/zshenv so updates
+# to these files propagate without touching /home/dev.
+COPY config/zshenv          /etc/zsh/zshenv
+COPY config/zshrc           /etc/zsh/zshrc
+COPY config/starship.toml   /etc/starship/config.toml
+COPY config/atuin.toml      /etc/atuin/config.toml
+COPY config/gitconfig       /etc/gitconfig
+COPY config/lazygit.yml     /etc/lazygit/config.yml
+COPY config/yazi-theme.toml /etc/yazi/theme.toml
+COPY config/nvim            /etc/xdg/nvim
+COPY tmux.conf              /etc/tmux.conf
+
+# ── Skeleton files merged into /home/dev on every boot via cp -an ──
+# (only needed for tools without a system-wide config path: btop)
+COPY config/skel/           /etc/skel-dev/
 
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh

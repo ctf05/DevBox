@@ -1,0 +1,48 @@
+[init]
+    defaultBranch = main
+
+[push]
+    autoSetupRemote = true
+
+[pull]
+    rebase = true
+
+[core]
+    editor = nvim
+    pager = delta
+
+[interactive]
+    diffFilter = delta --color-only
+
+[rerere]
+    enabled = true
+
+[worktree]
+    guessRemote = true
+
+[alias]
+    wt        = worktree
+    wta       = worktree add
+    wtl       = worktree list
+    wtr       = worktree remove
+    wtm       = worktree move
+    clone-bare = "!f() { git clone --bare \"$1\" \"$2\" && cd \"$2\" && git config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*' && git fetch origin; }; f"
+
+[delta]
+    side-by-side = true
+    line-numbers = true
+    hyperlinks = true
+    navigate = true
+    dark = true
+    syntax-theme = base16
+    file-style = "bold #ff56d3"
+    file-decoration-style = "#ff56d3 ul"
+    hunk-header-style = "file line-number syntax"
+    hunk-header-decoration-style = "#5d5d5d box"
+    line-numbers-minus-style = "#ff3d7f"
+    line-numbers-plus-style = "#7dff3e"
+    line-numbers-zero-style = "#5d5d5d"
+    minus-style = "syntax #2e1a1a"
+    minus-emph-style = "syntax #4a1a2a"
+    plus-style = "syntax #1a2e1a"
+    plus-emph-style = "syntax #1a4a2a"

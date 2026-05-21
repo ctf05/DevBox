@@ -1,0 +1,6 @@
+style = "compact"
+inline_height = 20
+show_preview = true
+filter_mode = "host"
+search_mode = "fuzzy"
+enter_accept = true
