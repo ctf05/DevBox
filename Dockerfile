@@ -37,6 +37,22 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     npx --yes playwright@latest install --with-deps chromium firefox webkit
 
+# ── Docker Engine + CLI + buildx + compose (official apt repo) ─────
+# Ubuntu 24.04 (noble). Per https://docs.docker.com/engine/install/ubuntu/.
+# The daemon won't be started by this image's entrypoint; consumers can
+# either bind-mount the host /var/run/docker.sock (docker-out-of-docker)
+# or run the container with --privileged and start dockerd manually.
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    install -m 0755 -d /etc/apt/keyrings \
+    && curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc \
+    && chmod a+r /etc/apt/keyrings/docker.asc \
+    && printf 'Types: deb\nURIs: https://download.docker.com/linux/ubuntu\nSuites: noble\nComponents: stable\nArchitectures: %s\nSigned-By: /etc/apt/keyrings/docker.asc\n' "$(dpkg --print-architecture)" > /etc/apt/sources.list.d/docker.sources \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+         docker-ce docker-ce-cli containerd.io \
+         docker-buildx-plugin docker-compose-plugin
+
 # ── GitHub-release binaries (parallel download) + terminfo ────────
 # This layer rebuilds when versions in install-tools.sh change.
 COPY install-tools.sh /tmp/install-tools.sh
@@ -47,6 +63,7 @@ RUN bash /tmp/install-tools.sh && rm /tmp/install-tools.sh /tmp/ghostty.terminfo
 RUN userdel -r ubuntu 2>/dev/null || true \
     && useradd -m -u 1000 -U -s /bin/zsh dev \
     && echo "dev ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/dev \
+    && usermod -aG docker dev \
     && mkdir -p /etc/skel-dev \
     && cp -a /home/dev/. /etc/skel-dev/
 
