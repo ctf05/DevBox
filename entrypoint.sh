@@ -46,4 +46,14 @@ chown -R dev:dev /home/dev
 mkdir -p /workspace
 chown dev:dev /workspace
 
+# Start the Docker daemon so `docker` works out of the box, the same way
+# it would on a normal machine. Skipped if the host's docker.sock is
+# bind-mounted in (docker-out-of-docker mode) — in that case the existing
+# socket is the host daemon and we shouldn't start a second one.
+# Requires the container to be run with --privileged.
+if [ ! -S /var/run/docker.sock ]; then
+  mkdir -p /var/log
+  dockerd > /var/log/dockerd.log 2>&1 &
+fi
+
 exec /usr/sbin/sshd -D -e
