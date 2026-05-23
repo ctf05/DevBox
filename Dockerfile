@@ -33,9 +33,16 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     && npm install -g pnpm @anthropic-ai/claude-code
 
 # ── Playwright browsers + their deps (slow, cache-stable) ──────────
+# Install into a system-wide path (not root's $HOME cache) so the `dev`
+# user can use them. PLAYWRIGHT_BROWSERS_PATH is also exported as an ENV
+# below so the runtime user resolves the same location.
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    npx --yes playwright@latest install --with-deps chromium firefox webkit
+    mkdir -p /ms-playwright \
+    && npx --yes playwright@latest install --with-deps chromium firefox webkit \
+    && chmod -R a+rwX /ms-playwright \
+    && chmod 1777 /ms-playwright
 
 # ── Docker Engine + CLI + buildx + compose (official apt repo) ─────
 # Ubuntu 24.04 (noble). Per https://docs.docker.com/engine/install/ubuntu/.
