@@ -70,6 +70,15 @@ chown dev:dev /workspace
 if [ ! -S /var/run/docker.sock ]; then
   mkdir -p /var/log
   dockerd > /var/log/dockerd.log 2>&1 &
+
+  # Block until the socket is accepting connections so SSH sessions don't
+  # race the daemon's boot. ~30s ceiling — if dockerd hasn't come up by
+  # then it's not going to, so we let sshd start anyway and surface the
+  # state via /var/log/dockerd.log rather than wedging the container.
+  for _ in $(seq 1 60); do
+    [ -S /var/run/docker.sock ] && docker -H unix:///var/run/docker.sock info >/dev/null 2>&1 && break
+    sleep 0.5
+  done
 fi
 
 exec /usr/sbin/sshd -D -e
