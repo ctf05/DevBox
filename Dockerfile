@@ -23,6 +23,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
       tree-sitter-cli \
       gcc g++ make cmake \
       libssl-dev pkg-config \
+      openjdk-21-jdk-headless \
     && locale-gen en_US.UTF-8
 
 # ── NodeSource + pnpm + Claude Code ────────────────────────────────
@@ -70,7 +71,8 @@ RUN bash /tmp/install-tools.sh && rm /tmp/install-tools.sh /tmp/ghostty.terminfo
 RUN userdel -r ubuntu 2>/dev/null || true \
     && useradd -m -u 1000 -U -s /bin/zsh dev \
     && echo "dev ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/dev \
-    && usermod -aG docker dev \
+    && groupadd -f kvm \
+    && usermod -aG docker,kvm dev \
     && mkdir -p /etc/skel-dev \
     && cp -a /home/dev/. /etc/skel-dev/
 
