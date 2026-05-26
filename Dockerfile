@@ -98,7 +98,8 @@ COPY tmux.conf              /etc/tmux.conf
 COPY config/skel/           /etc/skel-dev/
 
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh
+COPY new-worktree.sh /usr/local/bin/new-worktree
+RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/new-worktree
 
 EXPOSE 22
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
