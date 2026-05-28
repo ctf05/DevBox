@@ -45,6 +45,17 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     && chmod -R a+rwX /ms-playwright \
     && chmod 1777 /ms-playwright
 
+# ── iGPU userspace drivers ─────────────────────────────────────────
+# Playwright's --with-deps brings the Mesa GL driver (iris) and the Vulkan
+# loader, but NOT a Vulkan ICD — so any GL-on-Vulkan path fails with
+# "vkCreateInstance failed". Add the Intel Vulkan driver so the iGPU (passed in
+# at runtime via --device /dev/dri) can accelerate headless rendering instead of
+# falling back to CPU/llvmpipe.
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
+      mesa-vulkan-drivers
+
 # ── Docker Engine + CLI + buildx + compose (official apt repo) ─────
 # Ubuntu 24.04 (noble). Per https://docs.docker.com/engine/install/ubuntu/.
 # The daemon won't be started by this image's entrypoint; consumers can

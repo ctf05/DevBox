@@ -1,6 +1,23 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Grow /dev/shm for headless browsers. Docker's 64 MB default starves parallel
+# Chromium renderers (crashes surface as "Page crashed" / "Target closed").
+# The container runs --privileged, so an in-place remount is permitted; if it
+# isn't (non-privileged run), keep the default and continue.
+mount -o remount,size=2g /dev/shm || echo "entrypoint: /dev/shm remount skipped (needs --privileged)" >&2
+
+# Grant the dev user access to the passed-through GPU so headless browsers can
+# use the iGPU. The render node is world-accessible, but card0 isn't, and its
+# group id is host-defined — resolve it at runtime rather than hardcoding.
+# Fully best-effort: absent device or odd gids must not block boot.
+if [ -e /dev/dri/renderD128 ]; then
+  gpu_gid="$(stat -c %g /dev/dri/renderD128)"
+  getent group "$gpu_gid" >/dev/null 2>&1 || groupadd -g "$gpu_gid" render-host || true
+  gpu_group="$(getent group "$gpu_gid" | cut -d: -f1 || true)"
+  [ -n "$gpu_group" ] && usermod -aG "$gpu_group" dev || true
+fi
+
 # Persistent SSH host keys (survive image rebuilds)
 HOST_KEYS=/etc/ssh/keys
 mkdir -p "$HOST_KEYS"
