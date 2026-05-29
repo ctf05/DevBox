@@ -70,6 +70,20 @@ if [ -n "${TZ:-}" ] && [ -f "/usr/share/zoneinfo/$TZ" ]; then
   echo "$TZ" > /etc/timezone
 fi
 
+# Bridge selected container env vars into SSH sessions. sshd doesn't pass its
+# own environment to login shells, so vars set via `docker run -e` (Unraid
+# "Variable" entries) never reach interactive shells or the tools launched from
+# them (git, gh, claude). Write them to a file /etc/zsh/zshenv sources for every
+# zsh invocation. Rewritten from scratch each boot so a removed var doesn't linger.
+RUNTIME_ENV=/etc/zsh/env.runtime
+: > "$RUNTIME_ENV"
+for var in GITHUB_PERSONAL_ACCESS_TOKEN; do
+  val="${!var:-}"
+  [ -n "$val" ] && printf 'export %s=%q\n' "$var" "$val" >> "$RUNTIME_ENV"
+done
+chown dev:dev "$RUNTIME_ENV"
+chmod 600 "$RUNTIME_ENV"
+
 chown -R dev:dev /home/dev
 
 # Ensure the bind-mounted /workspace is owned by `dev` so Mutagen syncs
@@ -85,17 +99,38 @@ chown dev:dev /workspace
 # socket is the host daemon and we shouldn't start a second one.
 # Requires the container to be run with --privileged.
 if [ ! -S /var/run/docker.sock ]; then
-  mkdir -p /var/log
-  dockerd > /var/log/dockerd.log 2>&1 &
+  mkdir -p /var/log /var/lib/docker
 
-  # Block until the socket is accepting connections so SSH sessions don't
-  # race the daemon's boot. ~30s ceiling — if dockerd hasn't come up by
-  # then it's not going to, so we let sshd start anyway and surface the
-  # state via /var/log/dockerd.log rather than wedging the container.
+  # Respawn loop: a single dockerd crash used to wedge the container's Docker
+  # for the rest of the boot. Looping in a backgrounded subshell means transient
+  # failures self-heal; the 3s sleep keeps a permanently-broken daemon (e.g.
+  # /var/lib/docker landed on overlay-on-overlay) from spinning hot.
+  (
+    while :; do
+      printf '[entrypoint] starting dockerd at %s\n' "$(date -Iseconds)"
+      dockerd || true
+      printf '[entrypoint] dockerd exited at %s; restarting in 3s\n' "$(date -Iseconds)"
+      sleep 3
+    done
+  ) >> /var/log/dockerd.log 2>&1 &
+
+  # Block until the socket accepts connections so SSH sessions don't race the
+  # daemon. ~30s ceiling; surface the outcome in both /var/log/dockerd.log and
+  # container stderr (visible via `docker logs`) so a broken setup is obvious
+  # without having to exec in and dig.
+  ready=0
   for _ in $(seq 1 60); do
-    [ -S /var/run/docker.sock ] && docker -H unix:///var/run/docker.sock info >/dev/null 2>&1 && break
+    if [ -S /var/run/docker.sock ] && docker -H unix:///var/run/docker.sock info >/dev/null 2>&1; then
+      ready=1; break
+    fi
     sleep 0.5
   done
+  if [ "$ready" = 1 ]; then
+    printf '[entrypoint] dockerd ready at %s\n' "$(date -Iseconds)" >> /var/log/dockerd.log
+  else
+    printf '[entrypoint] WARNING: dockerd did not come up within 30s\n' >> /var/log/dockerd.log
+    echo "entrypoint: dockerd did not come up within 30s — see /var/log/dockerd.log" >&2
+  fi
 fi
 
 exec /usr/sbin/sshd -D -e

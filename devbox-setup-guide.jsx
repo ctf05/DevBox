@@ -694,6 +694,7 @@ git push -u origin main`}</Code>
                 {[
                   ['SSH_AUTHORIZED_KEYS', 'ssh-ed25519 AAAA... laptop\\nssh-ed25519 AAAA... phone'],
                   ['TZ', 'America/New_York'],
+                  ['GITHUB_PERSONAL_ACCESS_TOKEN', 'github_pat_... (optional; bridged into SSH sessions)'],
                 ].map(([k, v]) => (
                   <tr key={k} style={{ borderBottom: `1px solid ${C.line}` }}>
                     <td style={{ padding: '8px 4px', color: C.accent, whiteSpace: 'nowrap' }}>

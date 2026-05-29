@@ -11,3 +11,8 @@ export YAZI_CONFIG_HOME=/etc/yazi
 typeset -U path
 path=("$HOME/.local/bin" $path)
 export PATH
+
+# Runtime-injected env, written by the entrypoint from container env vars that
+# must reach SSH sessions. sshd starts login shells in a clean environment and
+# doesn't propagate its own env, so these are bridged through this file instead.
+[[ -f /etc/zsh/env.runtime ]] && source /etc/zsh/env.runtime
