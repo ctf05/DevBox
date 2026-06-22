@@ -70,5 +70,15 @@ yy() {
   rm -f -- "$tmp"
 }
 
+# ── Headroom: one-word "is it working?" check ──────────────────────
+# Prints live compression savings from the local proxy. Run a Claude
+# command first so there's traffic to measure. `hrdash` opens the UI.
+hrstats() {
+  curl -fsS "http://127.0.0.1:${HEADROOM_PORT:-8787}/stats" 2>/dev/null \
+    | jq -r '"Headroom: \(.tokens.saved) tokens saved — \(.tokens.savings_percent)% smaller — over \(.requests.total) requests"' \
+    || echo "Headroom proxy not reachable on :${HEADROOM_PORT:-8787} (disabled, not up yet, or no traffic)."
+}
+alias hrdash='echo "Open http://localhost:${HEADROOM_PORT:-8787}/dashboard (ssh -L ${HEADROOM_PORT:-8787}:localhost:${HEADROOM_PORT:-8787} ...)"'
+
 # ── Secrets (optional, off by default in container) ────────────────
 [[ -f "${HOME}/.secrets" ]] && source "${HOME}/.secrets"

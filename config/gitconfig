@@ -1,6 +1,17 @@
 [init]
     defaultBranch = main
 
+[user]
+    name = ctf05
+    email = 53078484+ctf05@users.noreply.github.com
+
+[credential "https://github.com"]
+    # Authenticates as ctf05 using the PAT from the container env
+    # (GITHUB_PERSONAL_ACCESS_TOKEN, bridged into shells by entrypoint.sh).
+    # No secret is stored here — only the env-var reference, expanded at run time.
+    # Scoped to github.com so the token is never sent to any other git host.
+    helper = "!f() { echo \"username=x-access-token\"; echo \"password=$GITHUB_PERSONAL_ACCESS_TOKEN\"; }; f"
+
 [push]
     autoSetupRemote = true
 

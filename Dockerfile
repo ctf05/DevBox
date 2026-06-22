@@ -33,6 +33,22 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     && apt-get install -y nodejs \
     && npm install -g pnpm @anthropic-ai/claude-code
 
+# ── Headroom — context-compression proxy for Claude Code ───────────
+# Installs the `headroom` CLI system-wide (pipx venv under /opt, shim in
+# /usr/local/bin) so the `dev` user gets it on PATH. Lean extras:
+#   proxy — the local HTTP/WS proxy that compresses every request
+#   code  — AST-aware source compression (tree-sitter)
+#   mcp   — the headroom_retrieve tool (pull back originals on demand)
+# No torch: the Kompress text model runs via the bundled ONNX runtime.
+# Pinned for cache-stable layers; bump HEADROOM_VERSION (or pass --build-arg)
+# to upgrade. entrypoint.sh starts the proxy and routes Claude Code through
+# it on boot (on by default; HEADROOM_ENABLED=0 to disable per-container).
+ARG HEADROOM_VERSION=0.26.0
+RUN PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/usr/local/bin \
+      pipx install "headroom-ai[proxy,code,mcp]==${HEADROOM_VERSION}" \
+    && chmod -R a+rX /opt/pipx \
+    && /usr/local/bin/headroom --version
+
 # ── Playwright browsers + their deps (slow, cache-stable) ──────────
 # Install into a system-wide path (not root's $HOME cache) so the `dev`
 # user can use them. PLAYWRIGHT_BROWSERS_PATH is also exported as an ENV

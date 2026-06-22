@@ -81,6 +81,12 @@ for var in GITHUB_PERSONAL_ACCESS_TOKEN; do
   val="${!var:-}"
   [ -n "$val" ] && printf 'export %s=%q\n' "$var" "$val" >> "$RUNTIME_ENV"
 done
+# Map the PAT to GH_TOKEN so the `gh` CLI authenticates as the same account
+# (ctf05) with no separate `gh auth login`. git authenticates via the
+# github.com credential helper in /etc/gitconfig, which reads the PAT directly.
+if [ -n "${GITHUB_PERSONAL_ACCESS_TOKEN:-}" ]; then
+  printf 'export GH_TOKEN=%q\n' "$GITHUB_PERSONAL_ACCESS_TOKEN" >> "$RUNTIME_ENV"
+fi
 chown dev:dev "$RUNTIME_ENV"
 chmod 600 "$RUNTIME_ENV"
 
@@ -131,6 +137,91 @@ if [ ! -S /var/run/docker.sock ]; then
     printf '[entrypoint] WARNING: dockerd did not come up within 30s\n' >> /var/log/dockerd.log
     echo "entrypoint: dockerd did not come up within 30s — see /var/log/dockerd.log" >&2
   fi
+fi
+
+# ── Headroom: route Claude Code through the local compression proxy ─
+# On by default. Disable per-container with HEADROOM_ENABLED=0 (also accepts
+# false/no/off). The proxy forwards Claude Code's existing OAuth token
+# untouched (subscription "stealth" mode), so no API key is needed. It runs
+# as `dev` so stats (~/.headroom/proxy_savings.json) and the perf log
+# (~/.headroom/logs/proxy.log) live under the dev user's home.
+#
+# Fail-safe: Claude is routed (via env.ANTHROPIC_BASE_URL in settings.json)
+# ONLY after the proxy answers /health. If it never comes up, routing is left
+# off so `claude` keeps working in normal direct mode instead of breaking.
+HEADROOM_PORT="${HEADROOM_PORT:-8787}"
+case "${HEADROOM_ENABLED:-1}" in
+  0|false|False|FALSE|no|No|NO|off|Off|OFF) headroom_on=0 ;;
+  *) headroom_on=1 ;;
+esac
+
+# Add (mode=on) or remove (mode=off) Headroom's two env keys in the dev user's
+# ~/.claude/settings.json. Claude Code reads settings at session start, so this
+# governs every new `claude` session; user-set keys on .env are preserved.
+hr_route() {  # $1 = on|off
+  local mode="$1"
+  runuser -u dev -- env HOME=/home/dev hr_mode="$mode" hr_port="$HEADROOM_PORT" bash -c '
+    f="$HOME/.claude/settings.json"
+    mkdir -p "$HOME/.claude"
+    [ -s "$f" ] || printf "{}\n" > "$f"
+    tmp="$(mktemp)" || exit 0
+    if [ "$hr_mode" = on ]; then
+      jq --arg url "http://127.0.0.1:$hr_port" \
+         ".env = ((.env // {}) + {ANTHROPIC_BASE_URL: \$url, ENABLE_TOOL_SEARCH: \"true\"})" \
+         "$f" > "$tmp" && mv "$tmp" "$f" || rm -f "$tmp"
+    else
+      jq "if has(\"env\") then .env |= (del(.ANTHROPIC_BASE_URL) | del(.ENABLE_TOOL_SEARCH)) else . end
+          | if (has(\"env\") and ((.env | length) == 0)) then del(.env) else . end" \
+         "$f" > "$tmp" && mv "$tmp" "$f" || rm -f "$tmp"
+    fi
+  ' || echo "entrypoint: headroom settings update ($mode) failed" >&2
+}
+
+if [ "$headroom_on" = 1 ]; then
+  touch /var/log/headroom.log && chown dev:dev /var/log/headroom.log || true
+
+  # Register the headroom_retrieve MCP tool (idempotent; proxy need not be up).
+  runuser -u dev -- env HOME=/home/dev PATH=/usr/local/bin:/usr/bin:/bin \
+    headroom mcp install --agent claude --proxy-url "http://127.0.0.1:${HEADROOM_PORT}" \
+    >> /var/log/headroom.log 2>&1 || echo "entrypoint: headroom mcp install failed (non-fatal)" >&2
+
+  # Proxy under a respawn loop (mirrors the dockerd pattern below/above), run as
+  # dev. HEADROOM_UPDATE_CHECK=off avoids the daily PyPI version ping.
+  (
+    while :; do
+      printf '[entrypoint] starting headroom proxy at %s\n' "$(date -Iseconds)"
+      runuser -u dev -- env HOME=/home/dev PATH=/usr/local/bin:/usr/bin:/bin \
+        HEADROOM_UPDATE_CHECK=off headroom proxy --port "$HEADROOM_PORT" || true
+      printf '[entrypoint] headroom proxy exited at %s; restarting in 3s\n' "$(date -Iseconds)"
+      sleep 3
+    done
+  ) >> /var/log/headroom.log 2>&1 &
+
+  # Enable Claude routing once /health passes (backgrounded so it never blocks
+  # boot). First boot may take a while: it downloads the ~261MB ONNX text model.
+  (
+    ready=0
+    for _ in $(seq 1 120); do
+      if curl -fsS "http://127.0.0.1:${HEADROOM_PORT}/health" >/dev/null 2>&1; then
+        ready=1; break
+      fi
+      sleep 1
+    done
+    if [ "$ready" = 1 ]; then
+      hr_route on
+      printf '[entrypoint] headroom proxy ready; Claude Code routed via 127.0.0.1:%s\n' \
+        "$HEADROOM_PORT" >> /var/log/headroom.log
+    else
+      hr_route off
+      printf '[entrypoint] WARNING: headroom proxy not ready in 120s; Claude left in direct mode\n' \
+        >> /var/log/headroom.log
+      echo "entrypoint: headroom proxy did not come up in 120s — Claude not routed; see /var/log/headroom.log" >&2
+    fi
+  ) &
+else
+  # Explicitly disabled — strip any prior routing so `claude` runs direct.
+  hr_route off
+  echo "entrypoint: Headroom disabled (HEADROOM_ENABLED=${HEADROOM_ENABLED:-})" >&2
 fi
 
 exec /usr/sbin/sshd -D -e
