@@ -99,16 +99,6 @@ chown -R dev:dev /home/dev
 mkdir -p /workspace
 chown dev:dev /workspace
 
-# Persist the Mutagen-synced workspace tree (projects + worktrees). The laptop
-# syncs ~/.superset to the same absolute path inside the container; that path is
-# bind-mounted from the host (see Unraid) so it survives container recreates.
-# Bind mounts surface the host dir's ownership (root), so chown it back to `dev`
-# — exactly like /home/dev and /workspace above. Top-level only: Mutagen writes
-# the children as `dev`, and recursing a large tree would slow every boot.
-SUPERSET_HOME=/home/popper-mobile/.superset
-mkdir -p "$SUPERSET_HOME"
-chown dev:dev "$SUPERSET_HOME"
-
 # Start the Docker daemon so `docker` works out of the box, the same way
 # it would on a normal machine. Skipped if the host's docker.sock is
 # bind-mounted in (docker-out-of-docker mode) — in that case the existing
