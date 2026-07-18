@@ -51,9 +51,20 @@ RUN PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/usr/local/bin \
 
 # ── Playwright browsers + their deps (slow, cache-stable) ──────────
 # Install into a system-wide path (not root's $HOME cache) so the `dev`
-# user can use them. PLAYWRIGHT_BROWSERS_PATH is also exported as an ENV
-# below so the runtime user resolves the same location.
+# user can use them. This is a warm-cache seed at `playwright@latest`; the dir
+# is world-writable + sticky (1777) so an app pinned to an OLDER playwright can
+# `playwright install` its exact browser revisions into the same location at
+# runtime (revisions are per-version, so the seed rarely matches an app's pin).
+#
+# PLAYWRIGHT_BROWSERS_PATH must reach the RUNTIME shell for any of this to work.
+# A Docker `ENV` only reaches PID 1 (the entrypoint) — sshd starts login shells
+# in a clean environment, so interactive/e2e sessions never saw it and fell back
+# to $HOME/.cache/ms-playwright (empty/stale, and $HOME-dependent). We therefore
+# set it in three places: this ENV (build + PID 1), /etc/environment (pam_env,
+# every login shell regardless of shell type), and /etc/zsh/zshenv (config/zshenv,
+# every zsh invocation incl. the node/pnpm children it spawns).
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN echo 'PLAYWRIGHT_BROWSERS_PATH=/ms-playwright' >> /etc/environment
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     mkdir -p /ms-playwright \

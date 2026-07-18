@@ -7,6 +7,15 @@ export ATUIN_CONFIG_DIR=/etc/atuin
 export LAZYGIT_CONFIG_DIR=/etc/lazygit
 export YAZI_CONFIG_HOME=/etc/yazi
 
+# Playwright browsers live at a fixed system-wide path (see Dockerfile). The
+# image's `ENV PLAYWRIGHT_BROWSERS_PATH` reaches PID 1 but NOT sshd login shells
+# (sshd starts them in a clean env), so without this every `playwright`/`pnpm
+# e2e` fell back to $HOME/.cache/ms-playwright — which is empty or stale, and
+# whose location shifts with $HOME (e.g. /home/dev vs the Mutagen-synced
+# /home/popper-mobile). Exporting it here makes browser resolution deterministic
+# and HOME-independent for all zsh sessions and the node/pnpm processes they spawn.
+export PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+
 # Local bins for tools installed under the dev user (npm globals, pipx, etc.)
 typeset -U path
 path=("$HOME/.local/bin" $path)

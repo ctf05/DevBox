@@ -77,7 +77,7 @@ fi
 # zsh invocation. Rewritten from scratch each boot so a removed var doesn't linger.
 RUNTIME_ENV=/etc/zsh/env.runtime
 : > "$RUNTIME_ENV"
-for var in GITHUB_PERSONAL_ACCESS_TOKEN; do
+for var in GITHUB_PERSONAL_ACCESS_TOKEN FAL_KEY; do
   val="${!var:-}"
   [ -n "$val" ] && printf 'export %s=%q\n' "$var" "$val" >> "$RUNTIME_ENV"
 done
