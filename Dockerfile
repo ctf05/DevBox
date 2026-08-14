@@ -40,16 +40,21 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 #   code  — AST-aware source compression (tree-sitter)
 #   mcp   — the headroom_retrieve tool (pull back originals on demand)
 # No torch: the Kompress text model runs via the bundled ONNX runtime.
-# Unpinned by default: upstream deletes releases from PyPI, and a pin to a
-# withdrawn version fails the build outright with no way to reproduce the old
-# image — 0.26.0 shipped here, then vanished, leaving a 0.25.0/0.27.0 gap.
-# A fresh build therefore resolves latest; pass --build-arg HEADROOM_VERSION=x
-# to pin one. The layer still caches, so an unchanged Dockerfile keeps whatever
-# it built last — this tracks latest at build time, not continuously. The
+# Pinned to 0.27.0. Latest (0.35.0) breaks Claude Code through the proxy: it
+# rewrites the request body (`body_mutated=true`, reason structural_diff) and
+# answers HTTP 200 with a body the client rejects as empty or malformed, which
+# kills every subagent on its first call â while reporting 0.0% token reduction
+# on those requests, so the rewrite buys nothing. Raise this pin only after
+# confirming a subagent completes a turn through the proxy.
+#
+# 0.27.0, not the 0.26.0 that shipped before, because upstream DELETES releases:
+# 0.26.0 vanished from PyPI and its absence failed the build outright. Treat any
+# pin here as perishable â when it disappears, move to the next version that
+# exists rather than assuming the build broke. Empty value = resolve latest.
 # `--version` below records what actually landed in the build log.
 # entrypoint.sh starts the proxy and routes Claude Code through it on boot
 # (on by default; HEADROOM_ENABLED=0 to disable per-container).
-ARG HEADROOM_VERSION=
+ARG HEADROOM_VERSION=0.27.0
 RUN PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/usr/local/bin \
       pipx install "headroom-ai[proxy,code,mcp]${HEADROOM_VERSION:+==${HEADROOM_VERSION}}" \
     && chmod -R a+rX /opt/pipx \
