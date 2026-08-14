@@ -104,7 +104,19 @@ chown dev:dev /workspace
 # bind-mounted in (docker-out-of-docker mode) — in that case the existing
 # socket is the host daemon and we shouldn't start a second one.
 # Requires the container to be run with --privileged.
-if [ ! -S /var/run/docker.sock ]; then
+#
+# The gate probes for a LIVE daemon, not for a socket file. A file test is
+# wrong after an unclean stop: the socket inode survives in the container
+# filesystem, so the gate reads "daemon present", skips startup, and leaves
+# Docker dead for the whole boot with no respawn loop to recover it — the
+# state that has to be fixed by hand every time. Worse, it is self-
+# perpetuating: a broken stack invites whoever finds it to repair Docker by
+# hand, and concurrent hand-repair of one daemon is how this box gets wedged.
+# A live host socket still answers here, so docker-out-of-docker is unchanged.
+if ! docker -H unix:///var/run/docker.sock info >/dev/null 2>&1; then
+  # dockerd refuses to bind over a leftover socket, so a stale one must go
+  # before the loop starts. Harmless when the path is already absent.
+  rm -f /var/run/docker.sock
   mkdir -p /var/log /var/lib/docker
 
   # Respawn loop: a single dockerd crash used to wedge the container's Docker

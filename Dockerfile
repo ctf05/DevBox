@@ -106,9 +106,17 @@ COPY config/ghostty.terminfo /tmp/ghostty.terminfo
 RUN bash /tmp/install-tools.sh && rm /tmp/install-tools.sh /tmp/ghostty.terminfo
 
 # ── User: `dev` (UID 1000), passwordless sudo, zsh login shell ─────
+# The deny list keeps container runtimes off the passwordless path. A second
+# dockerd or containerd started by hand against the same state directory
+# races the entrypoint's own daemon over cgroups, netns and veth teardown,
+# which is severe enough on a shared kernel to take the host down. `setsid`
+# is denied because sudo matches the invoked binary: `sudo setsid containerd`
+# would otherwise walk straight past a `containerd` denial.
+# This is a guardrail against a plausible mistake, not a security boundary —
+# `sudo sh -c` defeats it by design. Making it a boundary means an allow-list.
 RUN userdel -r ubuntu 2>/dev/null || true \
     && useradd -m -u 1000 -U -s /bin/zsh dev \
-    && echo "dev ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/dev \
+    && printf '%s\n' 'dev ALL=(ALL) NOPASSWD:ALL, !/usr/sbin/service, !/usr/bin/dockerd, !/usr/bin/containerd, !/usr/bin/setsid, !/bin/setsid' > /etc/sudoers.d/dev \
     && groupadd -f kvm \
     && usermod -aG docker,kvm dev \
     && mkdir -p /etc/skel-dev \
