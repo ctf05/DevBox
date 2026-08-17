@@ -2,6 +2,29 @@
 # Point tools at their system-wide config locations so updates to the image
 # take effect without copying anything to /home/dev.
 
+# ── Time posture ───────────────────────────────────────────────────
+# UTC is pinned image-wide (see Dockerfile ENV and entrypoint.sh). It is
+# re-asserted here because sshd starts login shells in a clean environment,
+# so the image's ENV never reaches an interactive session — the same reason
+# PLAYWRIGHT_BROWSERS_PATH is set below. Without this, `git`, `date` and
+# every generator run from a shell would format with a local offset again.
+export TZ=UTC
+
+# SOURCE_DATE_EPOCH pins the current day at midnight UTC. Build tools that
+# honour the reproducible-builds convention (tar, gzip, many bundlers) use it
+# instead of the live clock for embedded timestamps, so archives stop
+# carrying the minute they were produced. Tools that ignore it need the
+# `pinclock` wrapper, which reads this same value so the two never disagree.
+#
+# UTC days begin on exact multiples of 86400, so truncating the epoch is the
+# entire calculation — no date parsing, no DST edge case. Computed per shell
+# rather than baked at boot so it doesn't go stale across midnight on a box
+# that stays up for weeks.
+zmodload -F zsh/datetime p:EPOCHSECONDS 2>/dev/null
+if [[ -n "${EPOCHSECONDS:-}" ]]; then
+  export SOURCE_DATE_EPOCH=$(( EPOCHSECONDS - EPOCHSECONDS % 86400 ))
+fi
+
 export STARSHIP_CONFIG=/etc/starship/config.toml
 export ATUIN_CONFIG_DIR=/etc/atuin
 export LAZYGIT_CONFIG_DIR=/etc/lazygit

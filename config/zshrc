@@ -59,6 +59,14 @@ alias du='dust'
 alias top='btop'
 alias htop='btop'
 
+# ── Local wall-clock, on demand ────────────────────────────────────
+# The box is pinned to UTC (see zshenv), so `date` no longer answers "what
+# time is it here". `now` does, reading the zone from DEVBOX_LOCAL_TZ so this
+# public image never hardcodes the operator's geography — which is the exact
+# thing pinning UTC was meant to stop leaking. Set it per-container via
+# `docker run -e DEVBOX_LOCAL_TZ=...` if you want it; unset, `now` is just UTC.
+now() { TZ="${DEVBOX_LOCAL_TZ:-UTC}" date; }
+
 # ── yy: cd-into-yazi-cwd-on-exit ───────────────────────────────────
 yy() {
   local tmp

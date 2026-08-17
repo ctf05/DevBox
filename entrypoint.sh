@@ -64,11 +64,23 @@ if [ -f /run/secrets/git_ed25519 ]; then
   install -m 600 -o dev -g dev /run/secrets/git_ed25519 /home/dev/.ssh/id_ed25519
 fi
 
-# Timezone
-if [ -n "${TZ:-}" ] && [ -f "/usr/share/zoneinfo/$TZ" ]; then
-  ln -snf "/usr/share/zoneinfo/$TZ" /etc/localtime
-  echo "$TZ" > /etc/timezone
+# Timezone — forced to UTC, deliberately not configurable.
+#
+# A local zone stamps a recoverable offset onto every timestamp this box
+# emits (git dates, log lines, generated files), which pins the operator to a
+# geography. UTC is therefore a fixed part of the image's posture rather than
+# a per-container preference, and an inherited `-e TZ=...` from the host's
+# container config is overridden rather than honoured.
+#
+# The override is announced rather than applied silently: a setting that
+# quietly ignores what the operator asked for is the kind of surprise that
+# costs an hour to diagnose later.
+if [ -n "${TZ:-}" ] && [ "$TZ" != "UTC" ]; then
+  echo "entrypoint: ignoring inherited TZ=$TZ — this image pins UTC (privacy posture)" >&2
 fi
+export TZ=UTC
+ln -snf /usr/share/zoneinfo/UTC /etc/localtime
+echo UTC > /etc/timezone
 
 # Bridge selected container env vars into SSH sessions. sshd doesn't pass its
 # own environment to login shells, so vars set via `docker run -e` (Unraid

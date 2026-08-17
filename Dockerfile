@@ -4,9 +4,15 @@ FROM ubuntu:24.04
 
 ARG NODE_VERSION=22
 
+# TZ=UTC is a privacy posture, not a preference: a local zone stamps a
+# recoverable offset onto every timestamp any tool on this box emits, which
+# pins the operator to a geography. entrypoint.sh re-asserts this at
+# boot even if the container is started with -e TZ=..., and /etc/zsh/zshenv
+# re-asserts it for login shells, which sshd starts in a clean environment.
 ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8 \
-    LC_ALL=C.UTF-8
+    LC_ALL=C.UTF-8 \
+    TZ=UTC
 
 # ── Base apt layer (rarely changes; heavy cache value) ─────────────
 # All shells, editors, modern CLI tools available in apt, language deps
@@ -16,6 +22,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates curl wget gnupg sudo openssh-server \
       git tmux zsh build-essential locales tzdata jq unzip ncurses-term \
+      faketime \
       python3 python3-pip pipx \
       ripgrep fd-find bat fzf httpie \
       zsh-autosuggestions zsh-syntax-highlighting \
@@ -158,7 +165,10 @@ COPY config/skel/           /etc/skel-dev/
 
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY new-worktree.sh /usr/local/bin/new-worktree
-RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/new-worktree
+COPY pinclock.sh /usr/local/bin/pinclock
+COPY scrub-mtimes.sh /usr/local/bin/scrub-mtimes
+RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/new-worktree \
+             /usr/local/bin/pinclock /usr/local/bin/scrub-mtimes
 
 EXPOSE 22
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
