@@ -47,25 +47,33 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 #   code  — AST-aware source compression (tree-sitter)
 #   mcp   — the headroom_retrieve tool (pull back originals on demand)
 # No torch: the Kompress text model runs via the bundled ONNX runtime.
-# Pinned to 0.27.0. Latest (0.35.0) breaks Claude Code through the proxy: it
-# rewrites the request body (`body_mutated=true`, reason structural_diff) and
-# answers HTTP 200 with a body the client rejects as empty or malformed, which
-# kills every subagent on its first call â while reporting 0.0% token reduction
-# on those requests, so the rewrite buys nothing. Raise this pin only after
-# confirming a subagent completes a turn through the proxy.
-#
-# 0.27.0, not the 0.26.0 that shipped before, because upstream DELETES releases:
-# 0.26.0 vanished from PyPI and its absence failed the build outright. Treat any
-# pin here as perishable â when it disappears, move to the next version that
-# exists rather than assuming the build broke. Empty value = resolve latest.
+# Pinned to a main-branch commit, not a PyPI release. The two memory fixes this
+# proxy needs — TOIN pattern eviction and compression-cache side-table bounds —
+# first shipped in 0.35.0, but that release also breaks Claude Code through the
+# proxy: it answers HTTP 200 with a body the client rejects as empty or
+# malformed, killing subagents. Those response fixes merged after the tag and
+# are unreleased, so main is the first build carrying both. Verified against
+# this commit before pinning: a plain turn, a subagent turn, and a multi-tool
+# turn each complete, compression is non-zero, and the proxy log shows no
+# body-rewrite or malformed-response lines. Re-run that check before moving the
+# pin. A commit SHA also sidesteps the reason the previous pin was fragile —
+# upstream DELETES PyPI releases (0.26.0 vanished and failed the build outright).
 # `--version` below records what actually landed in the build log.
 # entrypoint.sh starts the proxy and routes Claude Code through it on boot
 # (on by default; HEADROOM_ENABLED=0 to disable per-container).
-ARG HEADROOM_VERSION=0.27.0
+ARG HEADROOM_REF=139c7cbdde6a68ae3ade24341a79e5ba659c2cf3
 RUN PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/usr/local/bin \
-      pipx install "headroom-ai[proxy,code,mcp]${HEADROOM_VERSION:+==${HEADROOM_VERSION}}" \
+      pipx install "headroom-ai[proxy,code,mcp] @ git+https://github.com/headroomlabs-ai/headroom@${HEADROOM_REF}" \
     && chmod -R a+rX /opt/pipx \
-    && /usr/local/bin/headroom --version
+    && /usr/local/bin/headroom --version \
+    && out="$(printf '' | timeout 25 /usr/local/bin/headroom mcp serve 2>&1 || true)" \
+    && case "$out" in \
+         *Traceback*) \
+           echo 'FATAL: headroom mcp serve crashes on this build:' >&2; \
+           printf '%s\\n' "$out" | tail -5 >&2; \
+           exit 1 ;; \
+       esac \
+    && echo 'headroom mcp serve: starts clean'
 
 # ── Playwright browsers + their deps (slow, cache-stable) ──────────
 # Install into a system-wide path (not root's $HOME cache) so the `dev`
