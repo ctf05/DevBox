@@ -88,5 +88,25 @@ hrstats() {
 }
 alias hrdash='echo "Open http://localhost:${HEADROOM_PORT:-8787}/dashboard (ssh -L ${HEADROOM_PORT:-8787}:localhost:${HEADROOM_PORT:-8787} ...)"'
 
+# ── claude-swap: account rotation at a glance ──────────────────────
+# The entrypoint runs `cswap auto` in the background (threshold/strategy from
+# CSWAP_* container env). `cswap` alone opens the dashboard, `cswap list` shows
+# every account's 5h/7d usage. `cslog` follows the auto-switcher's decisions —
+# switches highlighted, routine per-tick events (poll / no-switch / sleep)
+# dropped; pass -a to show those too.
+cslog() {
+  local all=0
+  [[ "${1:-}" == "-a" ]] && all=1
+  tail -n 200 -F /var/log/cswap.log | jq --unbuffered -rR --argjson all "$all" '
+    (fromjson? // .) as $e
+    | if ($e | type) != "object" then $e
+      elif ($all == 0) and ($e.event | IN("poll", "no-switch", "sleep")) then empty
+      elif $e.event == "switch" then
+        "\u001b[38;2;125;255;62m\($e.ts)  SWITCH  \($e.from.email // "?") → \($e.to.email // "?")  (\($e.trigger // ""))\u001b[0m"
+      else
+        "\($e.ts)  \($e.event)  \([$e.email, $e.reason, $e.detail, $e.message] | map(select(. != null and . != "")) | join("  "))"
+      end'
+}
+
 # ── Secrets (optional, off by default in container) ────────────────
 [[ -f "${HOME}/.secrets" ]] && source "${HOME}/.secrets"

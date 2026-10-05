@@ -248,4 +248,66 @@ else
   echo "entrypoint: Headroom disabled (HEADROOM_ENABLED=${HEADROOM_ENABLED:-})" >&2
 fi
 
+# ── claude-swap: rotate Claude Code across accounts before limits ──
+# On by default. Disable per-container with CSWAP_ENABLED=0 (also accepts
+# false/no/off). Accounts are added once by hand (`/login` in claude, then
+# `cswap add`) and persist under /home/dev/.local/share/claude-swap.
+#
+# Policy is re-asserted every boot so the container env is the single source of
+# truth — `cswap config set` by hand is overwritten on restart, the same way an
+# inherited TZ is. It is written to cswap's settings.json rather than passed as
+# flags so the dashboard and manual `cswap switch` see the same policy:
+#   CSWAP_THRESHOLD  switch when the active account's binding 5h/7d window
+#                    reaches this pct (default 98; 99 left too little margin
+#                    for many parallel sessions between ~60s usage polls)
+#   CSWAP_STRATEGY   consume-first (default) burns the account whose weekly
+#                    window resets soonest; best picks the most headroom
+#   CSWAP_MODEL      optional per-model weekly limits to fold in (e.g. Opus)
+#
+# Don't also enable auto-switch inside the cswap dashboard: the state lock keeps
+# two engines from corrupting anything, but they double the polling against
+# the per-account usage-endpoint budget.
+CSWAP_THRESHOLD="${CSWAP_THRESHOLD:-98}"
+CSWAP_STRATEGY="${CSWAP_STRATEGY:-consume-first}"
+case "${CSWAP_ENABLED:-1}" in
+  0|false|False|FALSE|no|No|NO|off|Off|OFF) cswap_on=0 ;;
+  *) cswap_on=1 ;;
+esac
+
+cswap_dev() {
+  runuser -u dev -- env HOME=/home/dev PATH=/usr/local/bin:/usr/bin:/bin cswap "$@"
+}
+
+if [ "$cswap_on" = 1 ]; then
+  touch /var/log/cswap.log && chown dev:dev /var/log/cswap.log || true
+
+  {
+    cswap_dev config set autoswitch.threshold "$CSWAP_THRESHOLD" \
+      && cswap_dev config set autoswitch.strategy "$CSWAP_STRATEGY" \
+      && if [ -n "${CSWAP_MODEL:-}" ]; then
+           cswap_dev config set autoswitch.model "$CSWAP_MODEL"
+         else
+           cswap_dev config unset autoswitch.model
+         fi
+  } >> /var/log/cswap.log 2>&1 \
+    || echo "entrypoint: cswap config failed — auto-switch runs on prior settings; see /var/log/cswap.log" >&2
+
+  # Engine under a respawn loop, run as dev. With no accounts added yet it
+  # idles (polling, logging no-active-account) rather than exiting, so it
+  # starts switching on its own once accounts exist. The 60s restart delay
+  # (vs 3s for dockerd/headroom) keeps a persistently failing engine from
+  # flooding the log; SIGTERM is handled by cswap itself.
+  (
+    while :; do
+      printf '[entrypoint] starting cswap auto at %s (threshold %s%%, %s)\n' \
+        "$(date -Iseconds)" "$CSWAP_THRESHOLD" "$CSWAP_STRATEGY"
+      cswap_dev auto --json || true
+      printf '[entrypoint] cswap auto exited at %s; restarting in 60s\n' "$(date -Iseconds)"
+      sleep 60
+    done
+  ) >> /var/log/cswap.log 2>&1 &
+else
+  echo "entrypoint: claude-swap auto-switch disabled (CSWAP_ENABLED=${CSWAP_ENABLED:-})" >&2
+fi
+
 exec /usr/sbin/sshd -D -e

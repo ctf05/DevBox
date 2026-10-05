@@ -75,6 +75,21 @@ RUN PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/usr/local/bin \
        esac \
     && echo 'headroom mcp serve: starts clean'
 
+# ── claude-swap — multi-account rotation for Claude Code ───────────
+# Installs the `cswap` CLI system-wide the same way as headroom (pipx venv
+# under /opt, shim in /usr/local/bin). entrypoint.sh runs `cswap auto` as `dev`
+# on boot to switch accounts before the active one hits its limit (on by
+# default; CSWAP_ENABLED=0 to disable per-container). Account logins and state
+# live under /home/dev/.local/share/claude-swap, on the persistent home mount,
+# so nothing account-specific is baked into the image.
+# 0.26.0 is the first stable release with the consume-first strategy and a
+# threshold ceiling above 95. `--version` records what landed in the build log.
+ARG CSWAP_VERSION=0.26.0
+RUN PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/usr/local/bin \
+      pipx install "claude-swap==${CSWAP_VERSION}" \
+    && chmod -R a+rX /opt/pipx \
+    && /usr/local/bin/cswap --version
+
 # ── Playwright browsers + their deps (slow, cache-stable) ──────────
 # Install into a system-wide path (not root's $HOME cache) so the `dev`
 # user can use them. This is a warm-cache seed at `playwright@latest`; the dir
