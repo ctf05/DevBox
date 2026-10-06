@@ -5,7 +5,7 @@ set -euo pipefail
 # Chromium renderers (crashes surface as "Page crashed" / "Target closed").
 # The container runs --privileged, so an in-place remount is permitted; if it
 # isn't (non-privileged run), keep the default and continue.
-mount -o remount,size=2g /dev/shm || echo "entrypoint: /dev/shm remount skipped (needs --privileged)" >&2
+mount -o remount,size=6g /dev/shm || echo "entrypoint: /dev/shm remount skipped (needs --privileged)" >&2
 
 # Grant the dev user access to the passed-through GPU so headless browsers can
 # use the iGPU. The render node is world-accessible, but card0 isn't, and its
