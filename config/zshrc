@@ -29,6 +29,42 @@ command -v atuin  >/dev/null && eval "$(atuin init zsh)"
 command -v mise   >/dev/null && eval "$(mise activate zsh)"
 command -v starship >/dev/null && eval "$(starship init zsh)"
 
+# ── Stray terminal replies never reach the line editor ─────────────
+# A terminal's answer to a capability query (DA1 "ESC [ ? … c", DA2
+# "ESC [ > … c", XTVERSION "ESC P > | … ESC \") is delivered as *input*. If it
+# arrives when nothing is waiting for it — a late answer, or the Superset app
+# replaying a saved pane stream that still contains the query — it lands in
+# ZLE, where the printable part becomes text and stray control bytes fire
+# whatever widget they happen to be bound to. That is what used to fill the
+# first prompt after `dev <session>` with escape-sequence soup.
+#
+# /usr/local/bin/ttyguard strips these from the tmux path; these bindings cover
+# the paths it doesn't (a bare `ssh dev` with no tmux, DEVBOX_TTYGUARD=0). Both
+# prefixes are responses that no key on any keyboard produces, so swallowing
+# them cannot eat real input.
+_devbox_eat_csi_reply() {
+  local byte
+  while read -t 0.2 -k 1 byte; do
+    [[ $byte == [[:alpha:]] ]] && break   # CSI final byte ends the response
+  done
+}
+_devbox_eat_dcs_reply() {
+  local byte prev=
+  while read -t 0.2 -k 1 byte; do
+    [[ $prev == $'\e' && $byte == '\' ]] && break   # ST ends the response
+    [[ $byte == $'\a' ]] && break                   # …or BEL, on some terminals
+    prev=$byte
+  done
+}
+zle -N _devbox_eat_csi_reply
+zle -N _devbox_eat_dcs_reply
+for _devbox_keymap in main vicmd; do
+  bindkey -M "$_devbox_keymap" '\e[?' _devbox_eat_csi_reply
+  bindkey -M "$_devbox_keymap" '\e[>' _devbox_eat_csi_reply
+  bindkey -M "$_devbox_keymap" '\eP'  _devbox_eat_dcs_reply
+done
+unset _devbox_keymap
+
 # ── fzf ────────────────────────────────────────────────────────────
 [[ -f /usr/share/doc/fzf/examples/key-bindings.zsh ]] && \
   source /usr/share/doc/fzf/examples/key-bindings.zsh

@@ -1,5 +1,13 @@
 palette = "neon"
 
+# Starship's 500ms default is tight for this box: `git` and `node` are both
+# slow on a cold page cache or a Mutagen-synced worktree, and every timeout
+# printed three "[WARN] - (starship::utils): Executing command ... timed out"
+# lines straight over the first prompt after `dev <session>`. 2s is enough for
+# the cold case while still capping how long a wedged command can stall the
+# prompt. STARSHIP_LOG=error (see /etc/zsh/zshenv) keeps the remainder quiet.
+command_timeout = 2000
+
 [character]
 success_symbol = "[❯](green)"
 error_symbol = "[❯](red)"

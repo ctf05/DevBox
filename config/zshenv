@@ -26,6 +26,11 @@ if [[ -n "${EPOCHSECONDS:-}" ]]; then
 fi
 
 export STARSHIP_CONFIG=/etc/starship/config.toml
+# Warnings go to stderr, which for a prompt means straight onto the screen the
+# user is about to type into — a slow `git` turned the first prompt of every
+# session into three lines of log. Errors still surface; see also
+# command_timeout in /etc/starship/config.toml.
+export STARSHIP_LOG=error
 export ATUIN_CONFIG_DIR=/etc/atuin
 export LAZYGIT_CONFIG_DIR=/etc/lazygit
 export YAZI_CONFIG_HOME=/etc/yazi

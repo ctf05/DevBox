@@ -190,8 +190,17 @@ COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY new-worktree.sh /usr/local/bin/new-worktree
 COPY pinclock.sh /usr/local/bin/pinclock
 COPY scrub-mtimes.sh /usr/local/bin/scrub-mtimes
+
+# ttyguard filters terminal capability chatter out of the tmux client's pty,
+# and the tmux shim (ahead of /usr/bin/tmux on PATH) is what puts it there.
+# Without it, attaching from the Superset app sprays the client's late
+# device-attribute replies across the pane as keystrokes. See ttyguard.py.
+COPY ttyguard.py /usr/local/bin/ttyguard
+COPY tmux-shim.sh /usr/local/bin/tmux
 RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/new-worktree \
-             /usr/local/bin/pinclock /usr/local/bin/scrub-mtimes
+             /usr/local/bin/pinclock /usr/local/bin/scrub-mtimes \
+             /usr/local/bin/ttyguard /usr/local/bin/tmux \
+    && [ -x /usr/bin/tmux ]
 
 EXPOSE 22
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
