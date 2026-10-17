@@ -205,14 +205,22 @@ def main(argv):
         return 2
     cmd = argv[1:]
 
+    def hand_off():
+        """Run the command unfiltered. Nothing here is worth failing over."""
+        try:
+            os.execvp(cmd[0], cmd)
+        except OSError as exc:
+            sys.stderr.write(f"ttyguard: {cmd[0]}: {exc.strerror}\n")
+            sys.exit(127)
+
     # Nothing to filter without a terminal on both ends — get out of the way.
     if not (os.isatty(0) and os.isatty(1)):
-        os.execvp(cmd[0], cmd)
+        hand_off()
 
     try:
         master, slave = pty.openpty()
     except OSError:
-        os.execvp(cmd[0], cmd)
+        hand_off()
 
     try:
         termios.tcsetattr(slave, termios.TCSANOW, termios.tcgetattr(0))
@@ -235,7 +243,10 @@ def main(argv):
             os.dup2(slave, target)
         if slave > 2:
             os.close(slave)
-        os.execvp(cmd[0], cmd)
+        try:
+            os.execvp(cmd[0], cmd)
+        except OSError as exc:
+            sys.stderr.write(f"ttyguard: {cmd[0]}: {exc.strerror}\r\n")
         os._exit(127)
 
     os.close(slave)
@@ -257,7 +268,10 @@ def main(argv):
 
     resized = [True]
     signal.signal(signal.SIGWINCH, lambda *_: resized.__setitem__(0, True))
-    for sig in (signal.SIGTERM, signal.SIGHUP):
+    # The child has its own session, so the tty never signals it directly.
+    # Anything aimed at us is meant for it. (In raw mode Ctrl-C is a byte, not
+    # a signal, so SIGINT here only ever comes from outside.)
+    for sig in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
         signal.signal(sig, lambda s, _f: os.kill(pid, s))
 
     held_in = b""

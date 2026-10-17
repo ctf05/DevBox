@@ -13,7 +13,9 @@
 # anything running without a terminal exec the real binary directly, so tmux
 # behaves exactly as before everywhere else.
 #
-# Escape hatch: DEVBOX_TTYGUARD=0 bypasses the wrapper entirely.
+# Escape hatch: DEVBOX_TTYGUARD=0 bypasses the wrapper entirely. /usr/bin/tmux
+# is also still there to be called directly, so a broken wrapper can never
+# cost you access to a session.
 
 REAL=/usr/bin/tmux
 [ -x "$REAL" ] || REAL=/bin/tmux
@@ -21,7 +23,7 @@ REAL=/usr/bin/tmux
 if [ "${DEVBOX_TTYGUARD:-1}" = 1 ] &&
    [ -z "$TMUX" ] &&
    [ -t 0 ] && [ -t 1 ] &&
-   [ -x /usr/local/bin/ttyguard ] &&
+   [ -s /usr/local/bin/ttyguard ] && [ -x /usr/local/bin/ttyguard ] &&
    [ -x "$REAL" ]
 then
   exec /usr/local/bin/ttyguard "$REAL" "$@"
