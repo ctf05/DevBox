@@ -36,7 +36,7 @@ cp -an /etc/skel-dev/. /home/dev/ 2>/dev/null || true
 
 # Deep-merge .claude/settings.json from skel into the user's existing
 # file. `cp -an` above skips files that already exist, but settings.json
-# is additive — new fields the image ships (e.g. statusLine) still need
+# is additive — new fields the image ships still need
 # to land alongside the user's prior customizations. User values win on
 # overlapping keys; new skel keys fill in the gaps.
 SKEL_SETTINGS=/etc/skel-dev/.claude/settings.json
