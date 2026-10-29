@@ -40,43 +40,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     && apt-get install -y nodejs \
     && npm install -g pnpm @anthropic-ai/claude-code
 
-# ── Headroom — context-compression proxy for Claude Code ───────────
-# Installs the `headroom` CLI system-wide (pipx venv under /opt, shim in
-# /usr/local/bin) so the `dev` user gets it on PATH. Lean extras:
-#   proxy — the local HTTP/WS proxy that compresses every request
-#   code  — AST-aware source compression (tree-sitter)
-#   mcp   — the headroom_retrieve tool (pull back originals on demand)
-# No torch: the Kompress text model runs via the bundled ONNX runtime.
-# Pinned to a main-branch commit, not a PyPI release. The two memory fixes this
-# proxy needs — TOIN pattern eviction and compression-cache side-table bounds —
-# first shipped in 0.35.0, but that release also breaks Claude Code through the
-# proxy: it answers HTTP 200 with a body the client rejects as empty or
-# malformed, killing subagents. Those response fixes merged after the tag and
-# are unreleased, so main is the first build carrying both. Verified against
-# this commit before pinning: a plain turn, a subagent turn, and a multi-tool
-# turn each complete, compression is non-zero, and the proxy log shows no
-# body-rewrite or malformed-response lines. Re-run that check before moving the
-# pin. A commit SHA also sidesteps the reason the previous pin was fragile —
-# upstream DELETES PyPI releases (0.26.0 vanished and failed the build outright).
-# `--version` below records what actually landed in the build log.
-# entrypoint.sh starts the proxy and routes Claude Code through it on boot
-# (on by default; HEADROOM_ENABLED=0 to disable per-container).
-ARG HEADROOM_REF=139c7cbdde6a68ae3ade24341a79e5ba659c2cf3
-RUN PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/usr/local/bin \
-      pipx install "headroom-ai[proxy,code,mcp] @ git+https://github.com/headroomlabs-ai/headroom@${HEADROOM_REF}" \
-    && chmod -R a+rX /opt/pipx \
-    && /usr/local/bin/headroom --version \
-    && out="$(printf '' | timeout 25 /usr/local/bin/headroom mcp serve 2>&1 || true)" \
-    && case "$out" in \
-         *Traceback*) \
-           echo 'FATAL: headroom mcp serve crashes on this build:' >&2; \
-           printf '%s\\n' "$out" | tail -5 >&2; \
-           exit 1 ;; \
-       esac \
-    && echo 'headroom mcp serve: starts clean'
-
 # ── claude-swap — multi-account rotation for Claude Code ───────────
-# Installs the `cswap` CLI system-wide the same way as headroom (pipx venv
+# Installs the `cswap` CLI system-wide (pipx venv
 # under /opt, shim in /usr/local/bin). entrypoint.sh runs `cswap auto` as `dev`
 # on boot to switch accounts before the active one hits its limit (on by
 # default; CSWAP_ENABLED=0 to disable per-container). Account logins and state
@@ -197,9 +162,15 @@ COPY scrub-mtimes.sh /usr/local/bin/scrub-mtimes
 # device-attribute replies across the pane as keystrokes. See ttyguard.py.
 COPY ttyguard.py /usr/local/bin/ttyguard
 COPY tmux-shim.sh /usr/local/bin/tmux
+
+# keyrouter puts one Anthropic API endpoint in front of several org API keys
+# (the monthly credits of each Max plan) and moves to the next key when one
+# runs out. Stdlib-only Python, so it adds no layer of its own. See keyrouter.py.
+COPY keyrouter.py /usr/local/bin/keyrouter
 RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/new-worktree \
              /usr/local/bin/pinclock /usr/local/bin/scrub-mtimes \
              /usr/local/bin/ttyguard /usr/local/bin/tmux \
+             /usr/local/bin/keyrouter \
     && [ -x /usr/bin/tmux ]
 
 EXPOSE 22

@@ -89,7 +89,7 @@ echo UTC > /etc/timezone
 # zsh invocation. Rewritten from scratch each boot so a removed var doesn't linger.
 RUNTIME_ENV=/etc/zsh/env.runtime
 : > "$RUNTIME_ENV"
-for var in GITHUB_PERSONAL_ACCESS_TOKEN FAL_KEY; do
+for var in GITHUB_PERSONAL_ACCESS_TOKEN FAL_KEY KEYROUTER_TOKEN; do
   val="${!var:-}"
   [ -n "$val" ] && printf 'export %s=%q\n' "$var" "$val" >> "$RUNTIME_ENV"
 done
@@ -163,91 +163,6 @@ if ! docker -H unix:///var/run/docker.sock info >/dev/null 2>&1; then
   fi
 fi
 
-# ── Headroom: route Claude Code through the local compression proxy ─
-# On by default. Disable per-container with HEADROOM_ENABLED=0 (also accepts
-# false/no/off). The proxy forwards Claude Code's existing OAuth token
-# untouched (subscription "stealth" mode), so no API key is needed. It runs
-# as `dev` so stats (~/.headroom/proxy_savings.json) and the perf log
-# (~/.headroom/logs/proxy.log) live under the dev user's home.
-#
-# Fail-safe: Claude is routed (via env.ANTHROPIC_BASE_URL in settings.json)
-# ONLY after the proxy answers /health. If it never comes up, routing is left
-# off so `claude` keeps working in normal direct mode instead of breaking.
-HEADROOM_PORT="${HEADROOM_PORT:-8787}"
-case "${HEADROOM_ENABLED:-1}" in
-  0|false|False|FALSE|no|No|NO|off|Off|OFF) headroom_on=0 ;;
-  *) headroom_on=1 ;;
-esac
-
-# Add (mode=on) or remove (mode=off) Headroom's two env keys in the dev user's
-# ~/.claude/settings.json. Claude Code reads settings at session start, so this
-# governs every new `claude` session; user-set keys on .env are preserved.
-hr_route() {  # $1 = on|off
-  local mode="$1"
-  runuser -u dev -- env HOME=/home/dev hr_mode="$mode" hr_port="$HEADROOM_PORT" bash -c '
-    f="$HOME/.claude/settings.json"
-    mkdir -p "$HOME/.claude"
-    [ -s "$f" ] || printf "{}\n" > "$f"
-    tmp="$(mktemp)" || exit 0
-    if [ "$hr_mode" = on ]; then
-      jq --arg url "http://127.0.0.1:$hr_port" \
-         ".env = ((.env // {}) + {ANTHROPIC_BASE_URL: \$url, ENABLE_TOOL_SEARCH: \"true\"})" \
-         "$f" > "$tmp" && mv "$tmp" "$f" || rm -f "$tmp"
-    else
-      jq "if has(\"env\") then .env |= (del(.ANTHROPIC_BASE_URL) | del(.ENABLE_TOOL_SEARCH)) else . end
-          | if (has(\"env\") and ((.env | length) == 0)) then del(.env) else . end" \
-         "$f" > "$tmp" && mv "$tmp" "$f" || rm -f "$tmp"
-    fi
-  ' || echo "entrypoint: headroom settings update ($mode) failed" >&2
-}
-
-if [ "$headroom_on" = 1 ]; then
-  touch /var/log/headroom.log && chown dev:dev /var/log/headroom.log || true
-
-  # Register the headroom_retrieve MCP tool (idempotent; proxy need not be up).
-  runuser -u dev -- env HOME=/home/dev PATH=/usr/local/bin:/usr/bin:/bin \
-    headroom mcp install --agent claude --proxy-url "http://127.0.0.1:${HEADROOM_PORT}" \
-    >> /var/log/headroom.log 2>&1 || echo "entrypoint: headroom mcp install failed (non-fatal)" >&2
-
-  # Proxy under a respawn loop (mirrors the dockerd pattern below/above), run as
-  # dev. HEADROOM_UPDATE_CHECK=off avoids the daily PyPI version ping.
-  (
-    while :; do
-      printf '[entrypoint] starting headroom proxy at %s\n' "$(date -Iseconds)"
-      runuser -u dev -- env HOME=/home/dev PATH=/usr/local/bin:/usr/bin:/bin \
-        HEADROOM_UPDATE_CHECK=off headroom proxy --port "$HEADROOM_PORT" || true
-      printf '[entrypoint] headroom proxy exited at %s; restarting in 3s\n' "$(date -Iseconds)"
-      sleep 3
-    done
-  ) >> /var/log/headroom.log 2>&1 &
-
-  # Enable Claude routing once /health passes (backgrounded so it never blocks
-  # boot). First boot may take a while: it downloads the ~261MB ONNX text model.
-  (
-    ready=0
-    for _ in $(seq 1 120); do
-      if curl -fsS "http://127.0.0.1:${HEADROOM_PORT}/health" >/dev/null 2>&1; then
-        ready=1; break
-      fi
-      sleep 1
-    done
-    if [ "$ready" = 1 ]; then
-      hr_route on
-      printf '[entrypoint] headroom proxy ready; Claude Code routed via 127.0.0.1:%s\n' \
-        "$HEADROOM_PORT" >> /var/log/headroom.log
-    else
-      hr_route off
-      printf '[entrypoint] WARNING: headroom proxy not ready in 120s; Claude left in direct mode\n' \
-        >> /var/log/headroom.log
-      echo "entrypoint: headroom proxy did not come up in 120s — Claude not routed; see /var/log/headroom.log" >&2
-    fi
-  ) &
-else
-  # Explicitly disabled — strip any prior routing so `claude` runs direct.
-  hr_route off
-  echo "entrypoint: Headroom disabled (HEADROOM_ENABLED=${HEADROOM_ENABLED:-})" >&2
-fi
-
 # ── claude-swap: rotate Claude Code across accounts before limits ──
 # On by default. Disable per-container with CSWAP_ENABLED=0 (also accepts
 # false/no/off). Accounts are added once by hand (`/login` in claude, then
@@ -295,7 +210,7 @@ if [ "$cswap_on" = 1 ]; then
   # Engine under a respawn loop, run as dev. With no accounts added yet it
   # idles (polling, logging no-active-account) rather than exiting, so it
   # starts switching on its own once accounts exist. The 60s restart delay
-  # (vs 3s for dockerd/headroom) keeps a persistently failing engine from
+  # (vs 3s for dockerd) keeps a persistently failing engine from
   # flooding the log; SIGTERM is handled by cswap itself.
   (
     while :; do
@@ -308,6 +223,33 @@ if [ "$cswap_on" = 1 ]; then
   ) >> /var/log/cswap.log 2>&1 &
 else
   echo "entrypoint: claude-swap auto-switch disabled (CSWAP_ENABLED=${CSWAP_ENABLED:-})" >&2
+fi
+
+# ── keyrouter: one API endpoint over several Anthropic org keys ────
+# Starts only when at least one KEYROUTER_KEY_<n> is set (Unraid "Variable"
+# entries, one per Max plan's Console org). Apps reach it with
+# ANTHROPIC_BASE_URL=$KEYROUTER_URL and ANTHROPIC_API_KEY=$KEYROUTER_TOKEN.
+#
+# The real keys reach only this process: they are deliberately NOT bridged into
+# env.runtime, and neither is ANTHROPIC_BASE_URL or ANTHROPIC_API_KEY — an
+# exported ANTHROPIC_API_KEY makes Claude Code bill the API instead of the
+# subscription, and the plan credits don't cover Claude Code anyway. Only the
+# client token and the URL reach shells. With KEYROUTER_TOKEN set the proxy
+# listens on all interfaces (so containers started inside this box can reach it
+# at the docker0 gateway); without one it stays on loopback.
+KEYROUTER_PORT="${KEYROUTER_PORT:-4000}"
+if compgen -e | grep -qE '^KEYROUTER_KEY_[0-9]+$'; then
+  touch /var/log/keyrouter.log && chown dev:dev /var/log/keyrouter.log || true
+  printf 'export KEYROUTER_URL=%q\n' "http://127.0.0.1:${KEYROUTER_PORT}" >> "$RUNTIME_ENV"
+
+  (
+    while :; do
+      runuser -u dev -- env HOME=/home/dev PATH=/usr/local/bin:/usr/bin:/bin \
+        KEYROUTER_PORT="$KEYROUTER_PORT" keyrouter || true
+      printf '[entrypoint] keyrouter exited at %s; restarting in 3s\n' "$(date -Iseconds)"
+      sleep 3
+    done
+  ) >> /var/log/keyrouter.log 2>&1 &
 fi
 
 exec /usr/sbin/sshd -D -e
