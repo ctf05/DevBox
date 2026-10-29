@@ -49,6 +49,16 @@ typeset -U path
 path=("$HOME/.local/bin" $path)
 export PATH
 
+# Commands an agent runs are the first thing to go under memory pressure.
+# Claude Code runs each one as `zsh -c …` with CLAUDECODE set, so this marks
+# the test run, linter or build — and every browser or worker it spawns, which
+# inherit it — and never the claude process that started it. Raising your own
+# oom_score_adj needs no privilege. The tiers are laid out at the top of
+# entrypoint.sh.
+if [[ -n ${CLAUDECODE:-} ]]; then
+  { print 1000 >| /proc/self/oom_score_adj } 2>/dev/null
+fi
+
 # Runtime-injected env, written by the entrypoint from container env vars that
 # must reach SSH sessions. sshd starts login shells in a clean environment and
 # doesn't propagate its own env, so these are bridged through this file instead.

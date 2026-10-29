@@ -1,6 +1,24 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# ── Memory pressure: who dies first ────────────────────────────────
+# This box can drive the host out of RAM. When that happens something has to be
+# killed — by earlyoom (below) or, as the backstop, the kernel OOM killer that
+# host/unraid-memory-guard.sh arms — and both pick by oom_score_adj:
+#
+#   +1000  commands agents run (tests, linters, builds, browsers) — set in
+#          /etc/zsh/zshenv for any shell carrying CLAUDECODE
+#    +300  everything else in this box: Claude sessions, tmux, shells, Mutagen,
+#          dockerd and the daemons below. Set here and inherited; sshd saves
+#          this value at startup and restores it in every session it forks.
+#       0  the host — Unraid itself, VMs, other containers (and containers run
+#          inside this box: runc sets them to 0 explicitly)
+#   -1000  sshd, PID 1 — OpenSSH applies that to itself
+#
+# So agent commands go first, then this box, and the host last.
+echo 300 > /proc/self/oom_score_adj \
+  || echo "entrypoint: could not set oom_score_adj — OOM kills will not prefer this box" >&2
+
 # Grow /dev/shm for headless browsers. Docker's 64 MB default starves parallel
 # Chromium renderers (crashes surface as "Page crashed" / "Target closed").
 # The container runs --privileged, so an in-place remount is permitted; if it
@@ -275,6 +293,47 @@ if compgen -e | grep -qE '^KEYROUTER_KEY_[0-9]+$'; then
       sleep 3
     done
   ) >> /var/log/keyrouter.log 2>&1 &
+fi
+
+# ── earlyoom: end the agent command, not the session ──────────────
+# Kills before the host runs short, and only what agents ran. On by default;
+# EARLYOOM_ENABLED=0 (also false/no/off) disables it.
+#
+# /proc/meminfo here is the host's, so the thresholds are host-wide: SIGTERM at
+# 2 GiB available, SIGKILL at 1 GiB — about 1.5% of a 128 GiB host, so nearly
+# everything is usable first. `-s 100` takes swap out of the decision: zram
+# lives in RAM and already shows up as lost MemAvailable, so it gets used to the
+# full before anything dies. The process namespace means only this box's
+# processes are ever candidates; the host's are invisible from here.
+#
+# The victim is the highest oom_score, i.e. the largest process of an agent
+# command (+1000, see the top of this file) — a browser, a test worker — and
+# the next-largest after that, one at a time, until memory recovers. --ignore
+# makes sessions and infrastructure untouchable outright; if they are all that
+# is left, earlyoom does nothing and the kernel's OOM killer is the backstop.
+#
+# No -g (kill the victim's whole process group), deliberately: --ignore only
+# stops a process being chosen, not being in the chosen one's group, and
+# Claude Code starts MCP servers in its own group — so one oversized MCP server
+# would take its session down with it.
+case "${EARLYOOM_ENABLED:-1}" in
+  0|false|False|FALSE|no|No|NO|off|Off|OFF) earlyoom_on=0 ;;
+  *) earlyoom_on=1 ;;
+esac
+
+if [ "$earlyoom_on" = 1 ]; then
+  (
+    while :; do
+      printf '[entrypoint] starting earlyoom at %s\n' "$(date -Iseconds)"
+      earlyoom -M 2097152,1048576 -s 100,100 -p -r 3600 \
+        --ignore '^(sshd|sshd-session|tmux.*|zsh|bash|claude|mutagen-agent|ttyguard|dockerd|containerd.*|runc|docker-proxy|runuser|sleep|cswap|keyrouter|earlyoom)$' \
+        || true
+      printf '[entrypoint] earlyoom exited at %s; restarting in 3s\n' "$(date -Iseconds)"
+      sleep 3
+    done
+  ) >> /var/log/earlyoom.log 2>&1 &
+else
+  echo "entrypoint: earlyoom disabled (EARLYOOM_ENABLED=${EARLYOOM_ENABLED:-})" >&2
 fi
 
 exec /usr/sbin/sshd -D -e
