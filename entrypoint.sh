@@ -50,6 +50,31 @@ if [ -f "$SKEL_SETTINGS" ] && [ -f "$USER_SETTINGS" ]; then
   fi
 fi
 
+# Sweep retired env keys out of the user's settings.json.
+#
+# The merge above can only ever ADD: user values win on overlapping keys, so
+# dropping a key from the image's settings leaves the old one live in
+# /home/dev forever. That is not cosmetic — ANTHROPIC_BASE_URL outlived the
+# headroom proxy it pointed at (127.0.0.1:8787), and with nothing listening
+# there every `claude` in the box hung on its first API call with no error
+# printed. A tool removed from the image has to be unconfigured here too.
+#
+# Add a key here when the service behind it leaves the image; drop it again
+# once no live container can still be carrying it.
+RETIRED_ENV_KEYS='ANTHROPIC_BASE_URL'
+if [ -f "$USER_SETTINGS" ]; then
+  tmp=$(mktemp)
+  if jq --arg keys "$RETIRED_ENV_KEYS" \
+       'if has("env") then .env |= delpaths([$keys | split(" ") | .[] | [.]]) else . end' \
+       "$USER_SETTINGS" > "$tmp" 2>/dev/null; then
+    cmp -s "$tmp" "$USER_SETTINGS" || echo "entrypoint: cleared retired env keys ($RETIRED_ENV_KEYS) from settings.json" >&2
+    mv "$tmp" "$USER_SETTINGS"
+  else
+    rm -f "$tmp"
+    echo "entrypoint: retired-env-key sweep failed; settings.json left as-is" >&2
+  fi
+fi
+
 # authorized_keys from env var (keys separated by `|`)
 mkdir -p /home/dev/.ssh
 if [ -n "${SSH_AUTHORIZED_KEYS:-}" ]; then
