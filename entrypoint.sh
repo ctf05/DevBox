@@ -25,6 +25,106 @@ echo 300 > /proc/self/oom_score_adj \
 # isn't (non-privileged run), keep the default and continue.
 mount -o remount,size=12g /dev/shm || echo "entrypoint: /dev/shm remount skipped (needs --privileged)" >&2
 
+# ── Client homes: /home/<user> must be persistent for any <user> ───
+#
+# A synced device addresses its files on this box by the absolute path it uses
+# itself — Mutagen's beta root is `dev:$HOME/.superset/...`, so both ends speak
+# one set of paths. That makes the whole prefix, not any single name under it,
+# the thing that has to live on persistent storage. Only /home/dev, /workspace,
+# /etc/ssh/keys and /run/secrets are mapped, so a plain /home/<user> directory
+# sits in the container's writable layer: an Unraid rebuild discards it, every
+# sync halts on root deletion, and the refill lands in docker.img (a 200 GB loop
+# shared with every other container on the host) to be discarded again by the
+# next update. Hence bind, not symlink — /workspace mounted over the prefix
+# makes every name under it persistent without the box knowing any of them, so
+# a device nobody has configured here yet works on first connect.
+#
+# RUNBOOK — adding a device
+#   1. Append its SSH public key to the SSH_AUTHORIZED_KEYS container variable
+#      (keys separated by `|`) and restart the container: authorized_keys is
+#      rewritten from that variable at boot, so a key added without a restart
+#      is not live yet.
+#   2. Give it access to the tunnel — Cloudflare Access for the hostname, and
+#      `ProxyCommand cloudflared access ssh --hostname %h` in its ssh config.
+#   3. Point its syncs at `dev:$HOME/...`, the device's own home path. Create
+#      nothing on the box: the first sync creates /home/<user>, which IS
+#      /workspace/<user> on devkeep/workspace, and survives every rebuild.
+#   There is no step 4. Two caveats worth knowing:
+#   - Devices that share a username share one tree. Same person on two
+#     machines, fine; two people, pick distinct usernames.
+#   - A device that keeps homes outside /home and /Users (Fedora Silverblue
+#     uses /var/home) needs that prefix added to CLIENT_HOME_PREFIXES in the
+#     container template. Nothing else changes.
+#
+# dev's own home is a separate mapping (devkeep/home, a different dataset) and
+# every tool here expects it at /home/dev, so it is stashed aside and re-bound
+# on top once the prefixes are in place. Failure unwinds and leaves Docker's
+# own /home/dev mount strictly alone: without it sshd has no authorized_keys
+# and this box is unreachable through its own tunnel.
+CLIENT_HOME_PREFIXES="${CLIENT_HOME_PREFIXES:-/home /Users}"
+devhome_stash=/run/devbox-devhome
+mirror_bound=""
+stash_bound=0
+devhome_bound=0
+
+is_mount() { awk -v t="$1" '$2==t{f=1} END{exit !f}' /proc/mounts; }
+
+mirror_unwind() {
+  if [ "$devhome_bound" = 1 ]; then umount /home/dev || true; devhome_bound=0; fi
+  for p in $mirror_bound; do umount "$p" || true; done
+  mirror_bound=""
+  if [ "$stash_bound" = 1 ]; then umount "$devhome_stash" || true; stash_bound=0; fi
+  return 0
+}
+
+mirror_setup() {
+  # No /home/dev mount means no mapping to preserve — and nothing persistent to
+  # bind into either, so leave the layout alone rather than invent one.
+  is_mount /home/dev || return 1
+  mkdir -p /workspace "$devhome_stash" || return 1
+  mount --bind /home/dev "$devhome_stash" || return 1
+  stash_bound=1
+  for p in $CLIENT_HOME_PREFIXES; do
+    # Refuse to shadow a mapped path. /home/dev is stashed above and re-bound
+    # below; any other mapping under a prefix (or the prefix itself) would
+    # vanish behind the bind with its data still on the host and nothing
+    # saying so. Leave the layout alone and name the mapping instead.
+    shadowed="$(awk -v p="$p" '$2=="/home/dev"{next} $2==p || index($2, p "/")==1 {print $2; exit}' /proc/mounts)"
+    if [ -n "$shadowed" ]; then
+      echo "entrypoint: $shadowed is a mapped path under $p — not binding over it" >&2
+      return 1
+    fi
+    mkdir -p "$p" || return 1
+    mount --bind /workspace "$p" || return 1
+    mirror_bound="$mirror_bound $p"
+  done
+  mkdir -p /home/dev || return 1   # now /workspace/dev, a mountpoint only
+  mount --bind "$devhome_stash" /home/dev || return 1
+  devhome_bound=1
+  # Prove dev's home is back before the rest of the boot writes into it.
+  [ "$(stat -c %d:%i /home/dev)" = "$(stat -c %d:%i "$devhome_stash")" ] || return 1
+}
+
+if mirror_setup; then
+  echo "entrypoint: client homes persistent at${mirror_bound} -> /workspace" >&2
+else
+  mirror_unwind
+  echo "entrypoint: client home prefixes not bound; falling back to per-name links (reason above — a mount refusal, or the bind needs --privileged)" >&2
+  # Fallback for a non-privileged run: link the names already on /workspace.
+  # Covers devices that have synced before; a new one still lands in the
+  # container layer, so the warning above is the thing to act on.
+  for ws in /workspace/*/; do
+    name="$(basename "$ws")"
+    [ -d "$ws/.superset" ] || continue
+    if [ -d "/home/$name" ] && [ ! -L "/home/$name" ]; then
+      echo "entrypoint: /home/$name is a real directory, not a link to $ws — leaving it alone" >&2
+      continue
+    fi
+    ln -snf "/workspace/$name" "/home/$name" \
+      || echo "entrypoint: could not link /home/$name -> /workspace/$name" >&2
+  done
+fi
+
 # Grant the dev user access to the passed-through GPU so headless browsers can
 # use the iGPU. The render node is world-accessible, but card0 isn't, and its
 # group id is host-defined — resolve it at runtime rather than hardcoding.
@@ -153,6 +253,7 @@ chown -R dev:dev /home/dev
 # alone (their content already has correct ownership from prior writes).
 mkdir -p /workspace
 chown dev:dev /workspace
+
 
 # Start the Docker daemon so `docker` works out of the box, the same way
 # it would on a normal machine. Skipped if the host's docker.sock is
