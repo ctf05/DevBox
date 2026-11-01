@@ -245,6 +245,38 @@ fi
 chown dev:dev "$RUNTIME_ENV"
 chmod 600 "$RUNTIME_ENV"
 
+# ── Backup settings: for devbox-backup only ────────────────────────
+# The BACKUP_* container variables (see devbox-backup.sh) go to one root-only
+# file on a tmpfs, so they never touch a disk, and the passwords are taken out
+# of this script's exported environment. Everything started from here on
+# (dockerd, cswap, keyrouter, Orca, sshd and so every login) inherits PID 1's
+# environment, and none of it needs them. They are deliberately NOT bridged
+# into env.runtime, which reaches every shell and agent.
+#
+# This keeps them out of environments, not out of reach: root in this box can
+# still read them (this file, /proc/<pid>/environ of earlier processes, docker
+# inspect on the host). That is the threat the separate rest-server answers;
+# see devbox-backup.sh.
+BACKUP_STATE=/run/devbox-backup
+mkdir -p "$BACKUP_STATE"
+if ! is_mount "$BACKUP_STATE"; then
+  mount -t tmpfs -o size=1m,mode=0700 tmpfs "$BACKUP_STATE" \
+    || echo "entrypoint: tmpfs for $BACKUP_STATE needs --privileged; backup settings stay in the container layer (root-only)" >&2
+fi
+chmod 700 "$BACKUP_STATE"
+(
+  umask 077
+  : > "$BACKUP_STATE/env"
+  for var in BACKUP_RESTIC_PASSWORD BACKUP_REST_PASSWORD BACKUP_REST_USER BACKUP_REPO BACKUP_HOST; do
+    val="${!var:-}"
+    # `if`, not `[ ] &&`: a false test as the subshell's last command would
+    # become its exit status, and set -e would end the boot over an unset
+    # optional variable.
+    if [ -n "$val" ]; then printf '%s=%q\n' "$var" "$val" >> "$BACKUP_STATE/env"; fi
+  done
+)
+export -n BACKUP_RESTIC_PASSWORD BACKUP_REST_PASSWORD
+
 chown -R dev:dev /home/dev
 
 # Ensure the bind-mounted /workspace is owned by `dev` so Mutagen syncs
@@ -396,6 +428,38 @@ if compgen -e | grep -qE '^KEYROUTER_KEY_[0-9]+$'; then
   ) >> /var/log/keyrouter.log 2>&1 &
 fi
 
+# ── devbox-backup: restic every 10 minutes, as the laptop does ─────
+# On by default; BACKUP_ENABLED=0 (also false/no/off) disables it. The schedule
+# starts even before BACKUP_* is set and says so in its log every 10 minutes
+# instead of exiting, so the first backup comes from a restart after the
+# variables are added, with nothing else to switch on.
+#
+# Root, because the backup covers sshd's host keys and files of every uid.
+# `env -i` for the same reason as Orca below: PID 1's environment holds the
+# KEYROUTER_KEY_* org keys and every other container variable, and restic needs
+# none of them. devbox-backup reads its own settings from /run/devbox-backup.
+# The 60s restart delay keeps a broken script from flooding the log.
+case "${BACKUP_ENABLED:-1}" in
+  0|false|False|FALSE|no|No|NO|off|Off|OFF) backup_on=0 ;;
+  *) backup_on=1 ;;
+esac
+
+if [ "$backup_on" = 1 ]; then
+  touch /var/log/devbox-backup.log && chmod 644 /var/log/devbox-backup.log || true
+  (
+    while :; do
+      printf '[entrypoint] starting devbox-backup loop at %s\n' "$(date -Iseconds)"
+      env -i HOME=/root USER=root LOGNAME=root LANG=C.UTF-8 LC_ALL=C.UTF-8 TZ=UTC \
+        PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+        devbox-backup loop || true
+      printf '[entrypoint] devbox-backup loop exited at %s; restarting in 60s\n' "$(date -Iseconds)"
+      sleep 60
+    done
+  ) >> /var/log/devbox-backup.log 2>&1 &
+else
+  echo "entrypoint: devbox-backup disabled (BACKUP_ENABLED=${BACKUP_ENABLED:-})" >&2
+fi
+
 # ── Orca: the host Orca Mobile pairs with, through Orca Relay ──────
 # The Orca desktop app on a virtual display, so the phone reaches the agents on
 # this box through Orca Relay — outbound only, no open port, laptop closed or
@@ -456,7 +520,10 @@ fi
 # is left, earlyoom does nothing and the kernel's OOM killer is the backstop.
 # Orca counts as both: every Orca process is named orca-ide, the PTY daemon its
 # terminals hang off included. Names are matched as the kernel truncates them,
-# to 15 characters (dbus-run-sessio, gnome-keyring-d).
+# to 15 characters (dbus-run-sessio, gnome-keyring-d). The backup schedule
+# (devbox-backup, and the timeout around each run) is protected; restic itself
+# deliberately is not: under real pressure a backup should die before a Claude
+# session does, and the next run 10 minutes later picks up where it left off.
 #
 # No -g (kill the victim's whole process group), deliberately: --ignore only
 # stops a process being chosen, not being in the chosen one's group, and
@@ -472,7 +539,7 @@ if [ "$earlyoom_on" = 1 ]; then
     while :; do
       printf '[entrypoint] starting earlyoom at %s\n' "$(date -Iseconds)"
       earlyoom -M 2097152,1048576 -s 100,100 -p -r 3600 \
-        --ignore '^(sshd|sshd-session|tmux.*|zsh|bash|claude|mutagen-agent|ttyguard|dockerd|containerd.*|runc|docker-proxy|runuser|sleep|cswap|keyrouter|earlyoom|orca-ide|orca-relay|Xvfb|dbus-daemon|dbus-run-sessio|gnome-keyring-d)$' \
+        --ignore '^(sshd|sshd-session|tmux.*|zsh|bash|claude|mutagen-agent|ttyguard|dockerd|containerd.*|runc|docker-proxy|runuser|sleep|cswap|keyrouter|earlyoom|orca-ide|orca-relay|Xvfb|dbus-daemon|dbus-run-sessio|gnome-keyring-d|devbox-backup|timeout)$' \
         || true
       printf '[entrypoint] earlyoom exited at %s; restarting in 3s\n' "$(date -Iseconds)"
       sleep 3

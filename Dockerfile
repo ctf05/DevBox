@@ -213,10 +213,16 @@ COPY keyrouter.py /usr/local/bin/keyrouter
 # orca-relay-browser it is Orca's $BROWSER: it records the sign-in link and
 # opens it on Orca's display. See orca-relay.sh.
 COPY orca-relay.sh /usr/local/bin/orca-relay
+
+# devbox-backup backs this box up to its own restic repo every 10 minutes, the
+# same backup the laptop runs (entrypoint.sh starts the schedule; restic comes
+# from install-tools.sh). See devbox-backup.sh.
+COPY devbox-backup.sh /usr/local/bin/devbox-backup
 RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/new-worktree \
              /usr/local/bin/pinclock /usr/local/bin/scrub-mtimes \
              /usr/local/bin/ttyguard /usr/local/bin/tmux \
              /usr/local/bin/keyrouter /usr/local/bin/orca-relay \
+             /usr/local/bin/devbox-backup \
     && ln -sfn orca-relay /usr/local/bin/orca-relay-browser \
     && [ -x /usr/bin/tmux ]
 

@@ -21,6 +21,9 @@ TLRC_VER=1.11.0
 DELTA_VER=0.18.2
 NVIM_VER=0.11.0
 GH_VER=2.63.2
+# restic: the release binary, not apt — noble ships 0.16.4, and devbox-backup
+# needs --stuck-request-timeout (0.18+).
+RESTIC_VER=0.19.1
 
 DL=/tmp/dl
 BIN=/usr/local/bin
@@ -56,6 +59,9 @@ fetch tlrc.tgz        "https://github.com/tldr-pages/tlrc/releases/download/v${T
 fetch delta.tgz       "https://github.com/dandavison/delta/releases/download/${DELTA_VER}/delta-${DELTA_VER}-${ARCH}-unknown-linux-gnu.tar.gz" & pids+=($!)
 fetch nvim.tgz        "https://github.com/neovim/neovim/releases/download/v${NVIM_VER}/nvim-linux-x86_64.tar.gz" & pids+=($!)
 fetch gh.tgz          "https://github.com/cli/cli/releases/download/v${GH_VER}/gh_${GH_VER}_linux_amd64.tar.gz" & pids+=($!)
+# restic keeps its release file names: SHA256SUMS lists them by name.
+fetch "restic_${RESTIC_VER}_linux_amd64.bz2" "https://github.com/restic/restic/releases/download/v${RESTIC_VER}/restic_${RESTIC_VER}_linux_amd64.bz2" & pids+=($!)
+fetch restic.SHA256SUMS "https://github.com/restic/restic/releases/download/v${RESTIC_VER}/SHA256SUMS" & pids+=($!)
 
 # Wait for all parallel downloads.
 for p in "${pids[@]}"; do
@@ -110,6 +116,12 @@ ln -sfn /opt/nvim-linux-x86_64/bin/nvim                        "$BIN/nvim"
 
 # gh: archive root: gh_${VER}_linux_amd64/{bin,share}
 tar -xzf gh.tgz && install -m755 gh_*/bin/gh                   "$BIN/gh"
+
+# restic: a single bzip2'd binary, checked against the release's SHA256SUMS
+# (it backs up this whole box, so a corrupted download is worth catching here)
+grep " restic_${RESTIC_VER}_linux_amd64.bz2\$" restic.SHA256SUMS | sha256sum -c -
+bunzip2 -c "restic_${RESTIC_VER}_linux_amd64.bz2" > restic-bin && install -m755 restic-bin "$BIN/restic"
+"$BIN/restic" version
 
 # ── terminfo (vendored from Ghostty 1.2.3; Tc + Su capabilities) ───
 # The file is COPY'd into the image by the Dockerfile to /tmp/ghostty.terminfo.

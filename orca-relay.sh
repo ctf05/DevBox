@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # orca-relay — run the Orca desktop app headless on this box, as the host the
-# Orca Mobile app pairs with through Orca Relay.
+# Orca Mobile app pairs with through Orca Relay. Setup steps (sign-in, phone
+# pairing, connecting the laptop): ORCA-RELAY.md in the devbox repo.
 #
 # Why the desktop app and not `orca-ide serve`
 # --------------------------------------------
@@ -181,29 +182,85 @@ orca_version() {
 # fails the sign-in outright if that does not exit 0. Record the URL (so
 # `status` can print it for a browser elsewhere), show it in Chromium on the
 # virtual display when one is installed, and return at once.
+#
+# Only Orca's own sign-in page gets a browser. $BROWSER is inherited by every
+# terminal and agent under Orca, so anything they open (`gh auth login --web`,
+# a dev server) would otherwise start a Chromium nobody can see and leave it
+# running. Those URLs are recorded and nothing more. The sign-in browser closes
+# itself once Orca's loopback listener for that sign-in is gone, i.e. the login
+# completed or Orca gave up on it (5 minutes), so it never lingers.
 cmd_open_url() {
-  local url="${1:-}" chrome
+  local url="${1:-}" chrome port pid
   [ -n "$url" ] || exit 0
   mkdir -p "$RUN_DIR" && chmod 700 "$RUN_DIR"
   (umask 077 && printf '%s\n' "$url" > "$RUN_DIR/last-url")
   { say "browser requested: $url" >> "$LOG"; } 2>/dev/null || true
+
+  case "$url" in
+    https://login.onorca.dev/*/auth/authorize\?*) ;;
+    *) exit 0 ;;
+  esac
   chrome="$(ls -d /ms-playwright/chromium-*/chrome-linux*/chrome 2>/dev/null | sort -V | tail -n 1)"
-  if [ -n "$chrome" ] && [ -n "${DISPLAY:-}" ]; then
-    mkdir -p "$STATE_DIR/browser"
-    nohup "$chrome" --user-data-dir="$STATE_DIR/browser" --no-first-run \
-      --no-default-browser-check --disable-gpu --password-store=basic \
-      --window-position=0,0 --window-size=1280,900 --new-window "$url" \
-      >/dev/null 2>&1 &
-    disown
-  fi
+  [ -n "$chrome" ] && [ -n "${DISPLAY:-}" ] || exit 0
+
+  mkdir -p "$STATE_DIR/browser"
+  nohup "$chrome" --user-data-dir="$STATE_DIR/browser" --no-first-run \
+    --no-default-browser-check --disable-gpu --password-store=basic \
+    --window-position=0,0 --window-size=1280,900 --new-window "$url" \
+    >/dev/null 2>&1 &
+  pid=$!
+  disown
+  port="$(printf '%s' "$url" | sed -nE 's/.*redirect_uri=http%3A%2F%2F127\.0\.0\.1%3A([0-9]+)%2F.*/\1/p')"
+  nohup "$(readlink -f "$0")" __close-browser "$pid" "${port:-0}" >/dev/null 2>&1 &
+  disown
   exit 0
+}
+
+loopback_listening() {
+  local hex
+  hex="$(printf '%04X' "$1")"
+  grep -q " 0100007F:$hex 00000000:0000 0A " /proc/net/tcp 2>/dev/null
+}
+
+# Not a public subcommand: closes the sign-in browser (pid $1) once the
+# sign-in's callback port ($2) stops listening, or after 10 minutes regardless.
+cmd_close_browser() {
+  local pid="$1" port="$2" waited=0
+  sleep 5
+  while [ "$waited" -lt 600 ] && kill -0 "$pid" 2>/dev/null; do
+    if [ "$port" != 0 ] && ! loopback_listening "$port"; then
+      sleep 3   # let the "signed in" page show before the window goes
+      break
+    fi
+    sleep 2; waited=$((waited + 2))
+  done
+  kill "$pid" 2>/dev/null || true
+}
+
+# Orca starts at 6768 and walks up when that is taken (a laptop's SSH-mode orcad
+# holds 6768 on this box), then remembers whatever it got, so the port has to be
+# read, not assumed. It is the listener in the 67xx range: the other one the
+# main process holds is the agent-hook server, on a random loopback port.
+runtime_port() {
+  local inode ports=""
+  for inode in $(ls -l "/proc/$1/fd" 2>/dev/null | sed -nE 's/.*socket:\[([0-9]+)\].*/\1/p'); do
+    ports="$ports $(awk -v i="$inode" '$10==i && $4=="0A" {split($2,a,":"); print a[2]}' /proc/net/tcp /proc/net/tcp6)"
+  done
+  local hex p best=""
+  for hex in $ports; do
+    p=$((16#$hex))
+    if [ "$p" -ge 6768 ] && [ "$p" -lt 6800 ]; then best="$p"; fi
+  done
+  echo "${best:-unknown}"
 }
 
 # ── status ──────────────────────────────────────────────────────────
 cmd_status() {
   local pid
   pid="$(orca_pid)"
-  if [ -n "$pid" ]; then say "Orca $(orca_version) running (pid $pid) on $DISPLAY_NUM"
+  if [ -n "$pid" ]; then
+    say "Orca $(orca_version) running (pid $pid) on $DISPLAY_NUM"
+    say "runtime port: $(runtime_port "$pid") (what a laptop's Remote Orca Server link dials)"
   else say "Orca is not running. Recent log:"; tail -n 15 "$LOG" 2>/dev/null || true
   fi
   xvfb_alive && say "display $DISPLAY_NUM up" || say "display $DISPLAY_NUM down"
@@ -295,6 +352,7 @@ esac
 case "${1:-}" in
   run)          cmd_run ;;
   __session)    cmd_session ;;
+  __close-browser) shift; cmd_close_browser "$@" ;;
   status)       cmd_status ;;
   vnc)          cmd_vnc ;;
   callback)     shift; cmd_callback "$@" ;;
