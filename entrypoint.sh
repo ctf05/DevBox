@@ -396,6 +396,48 @@ if compgen -e | grep -qE '^KEYROUTER_KEY_[0-9]+$'; then
   ) >> /var/log/keyrouter.log 2>&1 &
 fi
 
+# ── Orca: the host Orca Mobile pairs with, through Orca Relay ──────
+# The Orca desktop app on a virtual display, so the phone reaches the agents on
+# this box through Orca Relay — outbound only, no open port, laptop closed or
+# not. orca-relay.sh says why it is the desktop app and not `orca-ide serve`,
+# and what the keyring is for. On by default; ORCA_ENABLED=0 (also
+# false/no/off) disables it. tmux is untouched either way.
+#
+# One Orca runtime per box. A laptop whose Orca still uses this box as an SSH
+# host starts a second one (~/.orca-remote/orcad) over the same ~/.orca; connect
+# that laptop as a Remote Orca Server instead. `orca-relay status` warns while
+# both are up.
+#
+# `env -i`, unlike the runuser calls above: runuser keeps PID 1's environment,
+# and that holds KEYROUTER_KEY_* — the real org keys, which must reach only
+# keyrouter — plus every other container variable. Everything Orca starts
+# (terminals, agents, `gh`) would inherit them. orca-relay sources env.runtime
+# itself, the same bridge SSH logins get. The 10s restart delay gives a
+# crashed Orca's helpers time to exit; its PTY daemon is meant to stay, and
+# keeps terminals alive across the restart.
+case "${ORCA_ENABLED:-1}" in
+  0|false|False|FALSE|no|No|NO|off|Off|OFF) orca_on=0 ;;
+  *) orca_on=1 ;;
+esac
+
+if [ "$orca_on" = 1 ] && [ -x /opt/Orca/orca-ide ]; then
+  touch /var/log/orca.log && chown dev:dev /var/log/orca.log || true
+  (
+    while :; do
+      printf '[entrypoint] starting orca-relay at %s\n' "$(date -Iseconds)"
+      runuser -u dev -- env -i HOME=/home/dev USER=dev LOGNAME=dev \
+        LANG=C.UTF-8 LC_ALL=C.UTF-8 PATH=/usr/local/bin:/usr/bin:/bin \
+        orca-relay run || true
+      printf '[entrypoint] orca-relay exited at %s; restarting in 10s\n' "$(date -Iseconds)"
+      sleep 10
+    done
+  ) >> /var/log/orca.log 2>&1 &
+elif [ "$orca_on" = 1 ]; then
+  echo "entrypoint: Orca is not installed in this image (/opt/Orca/orca-ide); Orca Relay not started" >&2
+else
+  echo "entrypoint: Orca disabled (ORCA_ENABLED=${ORCA_ENABLED:-})" >&2
+fi
+
 # ── earlyoom: end the agent command, not the session ──────────────
 # Kills before the host runs short, and only what agents ran. On by default;
 # EARLYOOM_ENABLED=0 (also false/no/off) disables it.
@@ -412,6 +454,9 @@ fi
 # the next-largest after that, one at a time, until memory recovers. --ignore
 # makes sessions and infrastructure untouchable outright; if they are all that
 # is left, earlyoom does nothing and the kernel's OOM killer is the backstop.
+# Orca counts as both: every Orca process is named orca-ide, the PTY daemon its
+# terminals hang off included. Names are matched as the kernel truncates them,
+# to 15 characters (dbus-run-sessio, gnome-keyring-d).
 #
 # No -g (kill the victim's whole process group), deliberately: --ignore only
 # stops a process being chosen, not being in the chosen one's group, and
@@ -427,7 +472,7 @@ if [ "$earlyoom_on" = 1 ]; then
     while :; do
       printf '[entrypoint] starting earlyoom at %s\n' "$(date -Iseconds)"
       earlyoom -M 2097152,1048576 -s 100,100 -p -r 3600 \
-        --ignore '^(sshd|sshd-session|tmux.*|zsh|bash|claude|mutagen-agent|ttyguard|dockerd|containerd.*|runc|docker-proxy|runuser|sleep|cswap|keyrouter|earlyoom)$' \
+        --ignore '^(sshd|sshd-session|tmux.*|zsh|bash|claude|mutagen-agent|ttyguard|dockerd|containerd.*|runc|docker-proxy|runuser|sleep|cswap|keyrouter|earlyoom|orca-ide|orca-relay|Xvfb|dbus-daemon|dbus-run-sessio|gnome-keyring-d)$' \
         || true
       printf '[entrypoint] earlyoom exited at %s; restarting in 3s\n' "$(date -Iseconds)"
       sleep 3

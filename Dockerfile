@@ -123,6 +123,35 @@ COPY install-tools.sh /tmp/install-tools.sh
 COPY config/ghostty.terminfo /tmp/ghostty.terminfo
 RUN bash /tmp/install-tools.sh && rm /tmp/install-tools.sh /tmp/ghostty.terminfo
 
+# ── Orca — the host Orca Mobile pairs with through Orca Relay ──────
+# The Orca desktop app, run headless on an Xvfb display by orca-relay (see
+# orca-relay.sh): Relay and push notifications start only in desktop mode,
+# never under `orca-ide serve`. The .deb brings Orca's own dependencies (Xvfb,
+# xdg-utils and xdotool among them), links /usr/bin/orca-ide, and makes
+# chrome-sandbox setuid so Chromium's sandbox stays on in this container.
+#   gnome-keyring   a Secret Service for Electron safeStorage. Without one the
+#                   Orca account session is never written to disk, and every
+#                   restart signs Relay out.
+#   libglib2.0-bin  gdbus, which orca-relay uses to check the keyring opened
+#   x11vnc          shows the display (loopback only) to sign in and pair a phone
+#
+# Pinned like everything else here, and the .deb never updates itself. To
+# update, set ORCA_VERSION to a tag from github.com/stablyai/orca/releases and
+# push. Don't let it lag: Orca Mobile refuses a host whose protocol is too old,
+# and a laptop connecting to this box as a Remote Orca Server wants a matching
+# version.
+ARG ORCA_VERSION=1.4.245
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    curl -fsSL --retry 3 -o /tmp/orca-ide.deb \
+      "https://github.com/stablyai/orca/releases/download/v${ORCA_VERSION}/orca-ide_${ORCA_VERSION}_$(dpkg --print-architecture).deb" \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends /tmp/orca-ide.deb \
+         gnome-keyring libglib2.0-bin x11vnc \
+    && rm /tmp/orca-ide.deb \
+    && [ -x /opt/Orca/orca-ide ] && [ -x /usr/bin/orca-ide ] \
+    && [ "$(dpkg-query -W -f='${Version}' orca-ide)" = "${ORCA_VERSION}" ]
+
 # ── User: `dev` (UID 1000), passwordless sudo, zsh login shell ─────
 # The deny list keeps container runtimes off the passwordless path. A second
 # dockerd or containerd started by hand against the same state directory
@@ -179,10 +208,16 @@ COPY tmux-shim.sh /usr/local/bin/tmux
 # (the monthly credits of each Max plan) and moves to the next key when one
 # runs out. Stdlib-only Python, so it adds no layer of its own. See keyrouter.py.
 COPY keyrouter.py /usr/local/bin/keyrouter
+
+# orca-relay runs Orca for the phone (entrypoint.sh starts it). Invoked as
+# orca-relay-browser it is Orca's $BROWSER: it records the sign-in link and
+# opens it on Orca's display. See orca-relay.sh.
+COPY orca-relay.sh /usr/local/bin/orca-relay
 RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/new-worktree \
              /usr/local/bin/pinclock /usr/local/bin/scrub-mtimes \
              /usr/local/bin/ttyguard /usr/local/bin/tmux \
-             /usr/local/bin/keyrouter \
+             /usr/local/bin/keyrouter /usr/local/bin/orca-relay \
+    && ln -sfn orca-relay /usr/local/bin/orca-relay-browser \
     && [ -x /usr/bin/tmux ]
 
 EXPOSE 22
