@@ -52,6 +52,17 @@ Open Remmina, switch the protocol dropdown to **VNC**, connect to
 Pick the default agent (Claude). **Yolo mode is on by default**; turn it off if
 agents should ask before running commands. Finish or skip the rest.
 
+Then **Settings → General → Workspace Directory**: set it to
+`/home/popper-mobile/.superset/worktrees` (spelled out; `~` here is
+`/home/dev`, which Mutagen doesn't sync). Orca's default,
+`/home/dev/orca/workspaces`, would put every new worktree outside Mutagen, so it
+would never reach the laptop. Leave **Nest Workspaces** on; new worktrees land
+at `…/worktrees/<repo>/<name>`.
+
+This has to be set here, on the box. A laptop connected to the box can't change
+it: a server's workspace folder isn't one of the settings remote clients may
+write, and the laptop's per-host "Apply to" override is ignored by the server.
+
 ### 3. Sign in for Relay
 
 **Orca Mobile** (sidebar) → **Get started** → **Continue** → select
@@ -94,7 +105,9 @@ show their existing worktrees (Orca hides worktrees it didn't create itself
 until told otherwise). Run it again any time; it's safe to repeat. To add one
 repo: `orca-relay add-projects /path/to/repo`.
 
-Do step 6 first if the laptop is still using this box as an SSH host.
+It's fine to run this while the laptop still uses the box as an SSH host
+(step 6); until that's switched over, create new worktrees only through the
+box's Orca, so its workspace folder is the one used.
 
 ### 6. Laptop: use the box's Orca, not a second one
 
@@ -105,26 +118,35 @@ box's Orca. `orca-relay status` warns while both are up.
 
 To switch:
 
-1. In the laptop's Orca, let the sessions on this box finish (or `/exit` them;
-   a Claude conversation can be picked up again later with `claude --resume`).
-   Then remove this box under **Settings → SSH**.
-2. In the box's Orca (over VNC): **Settings → Remote Orca Servers → Advertise
-   this app as a server → New Link**. Choose `127.0.0.1` as the connection
-   address. The laptop reaches it through an SSH tunnel, so from the laptop's
-   side the server *is* on 127.0.0.1. Then **Generate Access Link** and copy it.
-3. On the box, `orca-relay status` prints the runtime port (6768, or a little
-   higher if that was taken when Orca first started). On the laptop, keep a
-   tunnel to it open:
+1. In the box's Orca (over VNC): **Settings → Remote Orca Servers → Share this
+   computer → This computer → Create link**. "This computer" makes a link that
+   dials `127.0.0.1`, which is right: through the SSH tunnel below, the laptop's
+   127.0.0.1 *is* the box. Copy the **Access link** (`orca://pair?code=…`;
+   anyone holding it can run commands as you, so treat it like a password).
+   Revoke links under **Active links** in the same dialog.
+2. On the box, `orca-relay status` prints the runtime port (6770 on this box,
+   because the laptop's SSH-mode orcad held 6768 when Orca first started; Orca
+   keeps the port it got). On the laptop, keep a tunnel to that port open, with
+   the same number on both sides, since the link names it. The dotfiles repo
+   does this as a user service, `devbox-orca-tunnel` (`hosts/popos.nix`),
+   which reconnects on its own after sleep or network changes. Check it with
+   `systemctl --user status devbox-orca-tunnel`. By hand, the same thing is:
 
    ```bash
-   ssh -N -L <port>:127.0.0.1:<port> dev
+   ssh -N -L 6770:127.0.0.1:6770 dev
    ```
 
-4. In the laptop's Orca: **Settings → Remote Orca Servers → Add Server**, paste
-   the link, and connect.
+   When the Cloudflare Access login lapses, the service can't renew it (that
+   needs a browser). The laptop shows the server disconnected until any
+   interactive `ssh dev` signs in again; the service then reconnects within
+   30 seconds.
 
-Step 6 is untested on this box so far. Orca's own docs list SSH forwarding as a
-supported route.
+3. In the laptop's Orca: **Settings → Remote Orca Servers → Add server**, give
+   it a name (e.g. `DevBox Orca`), paste the access link, and connect.
+4. Once the laptop shows the box's projects, move what's still running in the
+   old SSH-mode sessions (`/exit`, then `claude --resume` in a box-Orca
+   terminal), and remove this box under **Settings → SSH** on the laptop. Do
+   this last: it ends every terminal the laptop's SSH mode started here.
 
 ---
 
@@ -135,6 +157,21 @@ started here (SSH mode) never show up in the box's Orca or on the phone, even
 though they run on the same machine. Only sessions started inside the box's
 Orca do. To move a conversation: exit it, then in a box-Orca terminal in the
 same worktree run `claude --resume` and pick it.
+
+## Mutagen
+
+Mutagen keeps syncing `~/.superset` as before; worktrees Orca creates on the
+box land in `~/.superset/worktrees` and reach the laptop like the ones
+`new-worktree` makes. One rule keeps it safe: **only the box runs git on these
+repos.** Create worktrees through the box's Orca (or `new-worktree` on the box),
+not from projects the laptop's own Orca has open locally. Two machines writing
+the same `.git` at once is the one thing Mutagen can't merge.
+
+The laptop's `devbox-autosync` timer (dotfiles) makes one sync per folder under
+`~/.superset/worktrees/`, including folders that only exist on the devbox, so a
+worktree Orca makes for a repo the laptop has no worktrees folder for still
+comes back within about 2 minutes. Orca's scratch folder
+(`worktrees/.orca-preparing`) sits outside every per-repo sync and is skipped.
 
 ## Updating Orca
 

@@ -22,6 +22,11 @@
 #   vm.watermark_scale_factor = 100    background reclaim starts at ~1% free
 #                                      instead of 0.1%, so allocations stall
 #                                      in direct reclaim less often
+#   vm.max_map_count = 1048576   mappings one process may hold (default 65530);
+#                                V8 maps each heap page separately, so a Node
+#                                process running many worker threads aborts with
+#                                "JavaScript heap out of memory" at the default
+#                                long before memory runs out
 #
 # None of these cap memory: every process can still use all of RAM. The
 # devbox container decides WHICH process the OOM killer picks (its own tool
@@ -46,6 +51,7 @@ set_knob /sys/kernel/mm/lru_gen/enabled y
 set_knob /sys/kernel/mm/lru_gen/min_ttl_ms 1000
 set_knob /proc/sys/vm/min_free_kbytes 524288
 set_knob /proc/sys/vm/watermark_scale_factor 100
+set_knob /proc/sys/vm/max_map_count 1048576
 GUARD
 
 # Hook it into /boot/config/go, once, directly after the shebang so an `exit`
@@ -64,8 +70,8 @@ fi
 # Apply now, so no reboot is needed.
 bash /boot/config/devbox-memory-guard.sh
 
-# Show the result. Expect: 0x0007, 1000, 524288, 100.
+# Show the result. Expect: 0x0007, 1000, 524288, 100, 1048576.
 echo "--- live values ---"
-cat /sys/kernel/mm/lru_gen/enabled /sys/kernel/mm/lru_gen/min_ttl_ms /proc/sys/vm/min_free_kbytes /proc/sys/vm/watermark_scale_factor
+cat /sys/kernel/mm/lru_gen/enabled /sys/kernel/mm/lru_gen/min_ttl_ms /proc/sys/vm/min_free_kbytes /proc/sys/vm/watermark_scale_factor /proc/sys/vm/max_map_count
 echo "--- /boot/config/go ---"
 cat /boot/config/go
