@@ -507,7 +507,7 @@ fi
 # EARLYOOM_ENABLED=0 (also false/no/off) disables it.
 #
 # /proc/meminfo here is the host's, so the thresholds are host-wide: SIGTERM at
-# 2 GiB available, SIGKILL at 1 GiB — about 1.5% of a 128 GiB host, so nearly
+# 1 GiB available, SIGKILL at 512 MiB — about 0.8% of a 128 GiB host, so nearly
 # everything is usable first. `-s 100` takes swap out of the decision: zram
 # lives in RAM and already shows up as lost MemAvailable, so it gets used to the
 # full before anything dies. The process namespace means only this box's
@@ -538,7 +538,7 @@ if [ "$earlyoom_on" = 1 ]; then
   (
     while :; do
       printf '[entrypoint] starting earlyoom at %s\n' "$(date -Iseconds)"
-      earlyoom -M 2097152,1048576 -s 100,100 -p -r 3600 \
+      earlyoom -M 1048576,524288 -s 100,100 -p -r 3600 \
         --ignore '^(sshd|sshd-session|tmux.*|zsh|bash|claude|mutagen-agent|ttyguard|dockerd|containerd.*|runc|docker-proxy|runuser|sleep|cswap|keyrouter|earlyoom|orca-ide|orca-relay|Xvfb|dbus-daemon|dbus-run-sessio|gnome-keyring-d|devbox-backup|timeout)$' \
         || true
       printf '[entrypoint] earlyoom exited at %s; restarting in 3s\n' "$(date -Iseconds)"
