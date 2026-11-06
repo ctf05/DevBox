@@ -3,8 +3,9 @@ set -euo pipefail
 
 # ── Memory pressure: who dies first ────────────────────────────────
 # This box can drive the host out of RAM. When that happens something has to be
-# killed — by earlyoom (below) or, as the backstop, the kernel OOM killer that
-# host/unraid-memory-guard.sh arms — and both pick by oom_score_adj:
+# killed — by earlyoom (below, off by default) or, as the backstop, the kernel
+# OOM killer that host/unraid-memory-guard.sh arms — and both pick by
+# oom_score_adj:
 #
 #   +1000  commands agents run (tests, linters, builds, browsers) — set in
 #          /etc/zsh/zshenv for any shell carrying CLAUDECODE
@@ -503,8 +504,10 @@ else
 fi
 
 # ── earlyoom: end the agent command, not the session ──────────────
-# Kills before the host runs short, and only what agents ran. On by default;
-# EARLYOOM_ENABLED=0 (also false/no/off) disables it.
+# Kills before the host runs short, and only what agents ran. Off by default —
+# the binary stays installed; EARLYOOM_ENABLED=1 (also true/yes/on) turns it on.
+# While it is off, the kernel OOM killer armed by host/unraid-memory-guard.sh is
+# the only thing that kills, still preferring agent commands via oom_score_adj.
 #
 # /proc/meminfo here is the host's, so the thresholds are host-wide: SIGTERM at
 # 1 GiB available, SIGKILL at 512 MiB — about 0.8% of a 128 GiB host, so nearly
@@ -529,9 +532,9 @@ fi
 # stops a process being chosen, not being in the chosen one's group, and
 # Claude Code starts MCP servers in its own group — so one oversized MCP server
 # would take its session down with it.
-case "${EARLYOOM_ENABLED:-1}" in
-  0|false|False|FALSE|no|No|NO|off|Off|OFF) earlyoom_on=0 ;;
-  *) earlyoom_on=1 ;;
+case "${EARLYOOM_ENABLED:-0}" in
+  1|true|True|TRUE|yes|Yes|YES|on|On|ON) earlyoom_on=1 ;;
+  *) earlyoom_on=0 ;;
 esac
 
 if [ "$earlyoom_on" = 1 ]; then

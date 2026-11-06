@@ -58,7 +58,8 @@ RUN PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/usr/local/bin \
 # ── earlyoom — ends agent commands before the host runs out of RAM ──
 # Built from source: noble ships 1.7, which predates --ignore, and --ignore is
 # what keeps Claude sessions, tmux and the daemons off the kill list. One C
-# file set and no dependencies beyond the toolchain above. entrypoint.sh runs it.
+# file set and no dependencies beyond the toolchain above. Installed but off by
+# default: entrypoint.sh only runs it when EARLYOOM_ENABLED=1.
 ARG EARLYOOM_VERSION=1.9.0
 RUN curl -fsSL "https://github.com/rfjakob/earlyoom/archive/refs/tags/v${EARLYOOM_VERSION}.tar.gz" \
       | tar -xz -C /tmp \
