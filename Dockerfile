@@ -49,7 +49,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 # so nothing account-specific is baked into the image.
 # 0.26.0 is the first stable release with the consume-first strategy and a
 # threshold ceiling above 95. `--version` records what landed in the build log.
-ARG CSWAP_VERSION=0.26.0
+ARG CSWAP_VERSION=1.0.0
 RUN PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/usr/local/bin \
       pipx install "claude-swap==${CSWAP_VERSION}" \
     && chmod -R a+rX /opt/pipx \
