@@ -89,11 +89,39 @@ APP_FLAGS="--password-store=gnome-libsecret --disable-gpu"
 # and refuse to start Orca again, forever.
 orca_pid() { pgrep -u "$(id -u)" -o -xf "$APP_BIN $APP_FLAGS" 2>/dev/null || true; }
 
+# A field of Orca's orcad.lock (one line of JSON): a number or a quoted string.
+lock_field() {
+  sed -n -E "s/.*\"$2\":\"?([^\",}]*)\"?.*/\1/p" "$1" | head -n 1
+}
+
+# Orca refuses to start while orcad.lock names a holder that may still run. The
+# lock lives on the persistent /home/dev, so one written by a container that has
+# since been replaced outlives it, and the pid it names means nothing here. The
+# lock is stale when it was written on another host or in another boot, or when
+# its pid is gone. A lock that is unreadable, or whose holder is alive on this
+# host and boot, is left for Orca to judge.
+clear_stale_orca_lock() {
+  local lock="$1" pid boot host
+  [ -f "$lock" ] || return 0
+  pid="$(lock_field "$lock" pid)"
+  boot="$(lock_field "$lock" bootId)"
+  host="$(lock_field "$lock" host)"
+  [ -n "$pid" ] && [ -n "$boot" ] && [ -n "$host" ] || return 0
+  if [ "$boot" != "$(cat /proc/sys/kernel/random/boot_id)" ] \
+      || [ "$host" != "$(hostname)" ] \
+      || ! kill -0 "$pid" 2>/dev/null; then
+    say "removing stale Orca lock $lock (held by pid $pid on host $host)"
+    rm -f "$lock"
+  fi
+}
+
 # ── run ─────────────────────────────────────────────────────────────
 cmd_run() {
   [ "$(id -u)" != 0 ] || die "run as dev, not root (Orca's state belongs in dev's home)"
   [ -x "$APP_BIN" ] || die "Orca is not installed at $APP_BIN"
   [ -z "$(orca_pid)" ] || die "Orca is already running (pid $(orca_pid))"
+  clear_stale_orca_lock "$HOME/.config/orca/orcad.lock"
+  clear_stale_orca_lock "$HOME/.orca/orcad.lock"
   mkdir -p "$STATE_DIR" "$RUN_DIR" "$KEYRING_DIR"
   chmod 700 "$STATE_DIR" "$RUN_DIR"
 
